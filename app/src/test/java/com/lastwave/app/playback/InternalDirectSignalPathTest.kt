@@ -218,4 +218,12 @@ class InternalDirectSignalPathTest {
         }
         assertThat(values).containsExactly(8_388_607, -8_388_608, 4_194_304).inOrder()
     }
+
+    @Test
+    fun usbFallbackThroughDirectTrackReportsDirectWithoutCodecRow() {
+        val report = evaluateSignalPath(input(trackSession(InternalRoute.USB, verified = true)))
+        assertThat(report.internalDirectActive).isTrue()
+        assertThat(report.directToHal).isTrue()
+        assertThat(report.checks.none { it.labelRes == com.lastwave.app.R.string.signal_label_bt_codec }).isTrue()
+    }
 }

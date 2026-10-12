@@ -178,8 +178,13 @@ class NativeProcessingAudioSink(
             onConfiguredFormat?.invoke(format.sampleRate, format.pcmEncoding, format.channelCount)
         }
 
+        if (exclusiveWanted && internalDirect?.hasOpenStream() == true) {
+            // A direct AudioTrack left open on the DAC by the previous item
+            // keeps snd-usb-audio busy and would make the usbdevfs claim fail.
+            internalActive = false
+            runCatching { internalDirect?.reset() }
+        }
         if (tryConfigureExclusiveUsb(format)) {
-            if (internalDirect?.hasOpenStream() == true) runCatching { internalDirect?.reset() }
             internalActive = false
             bitPerfectAtConfigure = true
             return
@@ -1152,6 +1157,9 @@ class NativeProcessingAudioSink(
 
     private fun maybeAdoptExclusiveUsb() {
         if (!exclusiveWanted || usbExclusive || exclusiveStartFailed || !hasConfigured) return
+        // Never mid-track over a running internal direct output: the next
+        // item's configure() tries USB exclusive first anyway.
+        if (internalActive) return
         val format = configuredFormat ?: return
         if (tryConfigureExclusiveUsb(format)) {
             bitPerfectAtConfigure = true

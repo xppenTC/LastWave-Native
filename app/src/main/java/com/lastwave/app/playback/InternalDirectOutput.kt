@@ -215,7 +215,6 @@ class InternalDirectOutput @Inject constructor(
     ) {
         val (route, name) = currentRoute()
         val early = when {
-            route == InternalRoute.USB -> InternalDirectReason.USB
             _session.value != null -> InternalDirectReason.ACTIVE
             DIRECT_TRACK_OK -> {
                 val key = route.name
@@ -249,7 +248,6 @@ class InternalDirectOutput @Inject constructor(
             if (result != null) cachedProbe = result
             _availability.value = when {
                 _session.value != null -> InternalDirectAvailability(r, n, InternalDirectReason.ACTIVE, cachedProbe)
-                r == InternalRoute.USB -> InternalDirectAvailability(r, n, InternalDirectReason.USB)
                 result == null -> InternalDirectAvailability(r, n, InternalDirectReason.NATIVE_MISSING)
                 else -> InternalDirectAvailability(r, n, reasonFor(result), result)
             }
@@ -264,7 +262,7 @@ class InternalDirectOutput @Inject constructor(
         ) return false
         val srcEnc = encodingOf(format.pcmEncoding) ?: return false
         val (route, routeName) = currentRoute()
-        if (route == InternalRoute.USB) return fail(InternalDirectReason.USB)
+        // USB allowed: the sink only gets here when usbdevfs exclusive did not engage.
         val sourceBits = effectiveBits(srcEnc, bitDepthHint)
         var mixed = false
         synchronized(openLock) {

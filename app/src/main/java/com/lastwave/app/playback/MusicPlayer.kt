@@ -462,6 +462,8 @@ class MusicPlayer @Inject constructor(
     /** True while the usbdevfs exclusive session owns output. */
     @Volatile private var usbExclusiveSinkActive = false
     @Volatile private var usbExclusivePrefEnabled = false
+    /** Raw "USB Exclusive Output" toggle, before the Bit-Perfect gate. */
+    @Volatile private var usbExclusiveRawPref = false
     /** Fork: "Sortie directe interne" toggle (only effective with Bit-Perfect on). */
     @Volatile private var internalDirectPrefEnabled = false
     /** Availability of the internal exclusive endpoint (settings + signal path). */
@@ -1661,6 +1663,7 @@ class MusicPlayer @Inject constructor(
                 bitPerfectEnabled = settings.isBitPerfectEnabled
                 systemEffectsModePref = settings.systemEffectsMode
                 updateBitPerfectState()
+                recomputeUsbExclusivePref()
                 if (bitPerfectEnabled && settings.isStudioMasterClarityEnabled) {
                     // Self-heal: both must never be on — Bit-Perfect wins.
                     settingsPreferences.setStudioMasterClarity(false)
@@ -1718,7 +1721,8 @@ class MusicPlayer @Inject constructor(
 
         applicationScope.launch {
             UsbExclusivePrefs.enabledFlow(appContext).collect { enabled ->
-                usbExclusivePrefEnabled = enabled && bitPerfectEnabled
+                usbExclusiveRawPref = enabled
+                recomputeUsbExclusivePref()
                 if (usbExclusivePrefEnabled) maybeRequestUsbPermission()
                 onMain {
                     applyDacRoutingFor(currentSourceRateHz())
@@ -1730,6 +1734,8 @@ class MusicPlayer @Inject constructor(
         applicationScope.launch {
             com.lastwave.app.playback.usb.InternalDirectPrefs.enabledFlow(appContext).collect { enabled ->
                 internalDirectPrefEnabled = enabled
+                recomputeUsbExclusivePref()
+                if (usbExclusivePrefEnabled) maybeRequestUsbPermission()
                 onMain {
                     applyDacRoutingFor(currentSourceRateHz())
                     updateSignalPath()
@@ -2895,18 +2901,27 @@ class MusicPlayer @Inject constructor(
     }
 
     /**
-     * Fork: exclusive AAudio (MMAP) on the phone's own output. Same contract as
-     * USB exclusive: Bit-Perfect must be on (it is what turns the DSP off), the
-     * source must be stereo PCM, and a granted USB exclusive session wins.
+     * Fork: direct output without usbdevfs (direct AudioTrack, then AAudio
+     * MMAP). Bit-Perfect must be on (it is what turns the DSP off). Every route,
+     * Bluetooth and USB included: on a USB DAC the sink tries usbdevfs
+     * exclusive FIRST and only falls back to this when it does not engage
+     * (permission not granted yet, driver refused, …).
      */
     private fun internalDirectWanted(): Boolean {
         if (isCasting) return false
         if (!bitPerfectEnabled || !internalDirectPrefEnabled) return false
-        if (isSpatialAudioCodec(_state.value.audioCodec)) return false
-        if (exclusiveUsbWanted()) return false
-        // Bluetooth included: the vendor direct profile reaches A2DP (encoded in
-        // the DSP). USB DACs belong to the usbdevfs exclusive output.
-        return internalDirectOutput.currentRoute().first != InternalRoute.USB
+        return !isSpatialAudioCodec(_state.value.audioCodec)
+    }
+
+    /**
+     * Effective USB exclusive wish, recomputed whenever an input changes. The
+     * old code captured "enabled && bitPerfectEnabled" once: when the pref
+     * flow emitted before the settings flow at startup, USB exclusive stayed
+     * off for the whole session. The internal direct toggle implies it too —
+     * "bypass the mixer" has to cover a USB DAC.
+     */
+    private fun recomputeUsbExclusivePref() {
+        usbExclusivePrefEnabled = bitPerfectEnabled && (usbExclusiveRawPref || internalDirectPrefEnabled)
     }
 
     /** True only for genuine Atmos decode: an E-AC-3 JOC decoder. A plain
