@@ -32,9 +32,9 @@ class InternalDirectSignalPathTest {
     )
 
     private fun input(internal: InternalDirectSession?) = SignalPathInput(
-        sourceLabel = "FLAC 24/96",
-        sourceRateHz = 96_000,
-        sourceBitDepth = 24,
+        sourceLabel = "FLAC",
+        sourceRateHz = internal?.sourceRateHz ?: 96_000,
+        sourceBitDepth = internal?.sourceBits ?: 24,
         isLossless = true,
         appOutputRateHz = internal?.deviceRateHz ?: 96_000,
         platformMixerRateHz = 48_000,
