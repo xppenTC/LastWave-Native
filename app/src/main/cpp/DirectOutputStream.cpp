@@ -313,7 +313,8 @@ void DirectOutputStream::flush() noexcept {
     std::lock_guard<std::mutex> guard(lock_);
     if (ring_ == nullptr) return;
     hasDeliveredAudio_.store(false, std::memory_order_release);
-    if (stream_ != nullptr && started_.load(std::memory_order_acquire)) {
+    // started_ is only ever true while stream_ is open (see start()/closeLocked()).
+    if (started_.load(std::memory_order_acquire)) {
         // The RT callback owns the read index: let it drop the backlog on its
         // next pass. [write] refuses input until then so no post-seek audio is
         // discarded with it.
