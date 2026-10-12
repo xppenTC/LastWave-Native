@@ -34,6 +34,17 @@ class UsbAudioDevice private constructor(private val context: Context) {
     private var connection: UsbDeviceConnection? = null
     private var currentDevice: UsbDevice? = null
     private var claimedInterface: UsbInterface? = null
+    /**
+     * bInterfaceNumber of the PLAYBACK AudioStreaming interface (-1 = unknown).
+     * USB headset-style dongles also expose a CAPTURE (microphone) AS
+     * interface; every alt-setting/descriptor operation must stay on the
+     * playback one or the driver ends up driving the microphone.
+     */
+    @Volatile private var playbackInterfaceId: Int = -1
+
+    /** Why the last [openDevice] returned null (for the signal-path page). */
+    @Volatile var lastOpenError: String? = null
+        private set
 
     companion object {
         private const val TAG = "UsbAudioDevice"
@@ -151,11 +162,26 @@ class UsbAudioDevice private constructor(private val context: Context) {
         }
         // Close any stale connection before opening new
         closeDevice()
+        lastOpenError = null
         val conn = usbManager.openDevice(device)
         if (conn == null) {
             Log.e(TAG, "Failed to open device ${device.productName}")
+            lastOpenError = "Android refused to open the device"
             return null
         }
+        // The playback AS interface is the one owning an isochronous OUT
+        // endpoint in some alt setting (capture interfaces only have IN).
+        playbackInterfaceId = (0 until device.interfaceCount)
+            .map { device.getInterface(it) }
+            .firstOrNull { iface ->
+                iface.interfaceClass == UsbConstants.USB_CLASS_AUDIO &&
+                    iface.interfaceSubclass == 2 &&
+                    (0 until iface.endpointCount).any { e ->
+                        val ep = iface.getEndpoint(e)
+                        ep.type == UsbConstants.USB_ENDPOINT_XFER_ISOC && ep.direction == UsbConstants.USB_DIR_OUT
+                    }
+            }?.id ?: -1
+        Log.i(TAG, "Playback AudioStreaming interface: $playbackInterfaceId")
 
         // Find the AudioStreaming interface and its endpoints
         var streamingInterface: UsbInterface? = null
@@ -168,7 +194,7 @@ class UsbAudioDevice private constructor(private val context: Context) {
         for (i in 0 until device.interfaceCount) {
             val iface = device.getInterface(i)
             if (iface.interfaceClass == UsbConstants.USB_CLASS_AUDIO &&
-                iface.interfaceSubclass == 2) {
+                iface.interfaceSubclass == 2 && isPlaybackId(iface.id)) {
                 altSettingCount++
 
                 // Look for endpoints in non-zero alt settings
@@ -201,6 +227,7 @@ class UsbAudioDevice private constructor(private val context: Context) {
 
         if (streamingInterface == null || endpointOut < 0) {
             Log.e(TAG, "No suitable AudioStreaming interface/endpoint found")
+            lastOpenError = "no playback endpoint in the USB descriptors"
             conn.close()
             return null
         }
@@ -223,6 +250,7 @@ class UsbAudioDevice private constructor(private val context: Context) {
                 "(alt=${streamingInterface.alternateSetting}, endpoints=${streamingInterface.endpointCount})")
         if (!claimed) {
             Log.e(TAG, "Failed to claim streaming interface — kernel driver may still be active")
+            lastOpenError = "Android kept the DAC (interface ${streamingInterface.id} could not be claimed)"
             conn.close()
             return null
         }
@@ -232,7 +260,7 @@ class UsbAudioDevice private constructor(private val context: Context) {
         val zeroAlt = (0 until device.interfaceCount)
                 .map { device.getInterface(it) }
                 .firstOrNull { it.interfaceClass == UsbConstants.USB_CLASS_AUDIO &&
-                        it.interfaceSubclass == 2 && it.alternateSetting == 0 }
+                        it.interfaceSubclass == 2 && it.alternateSetting == 0 && isPlaybackId(it.id) }
         if (zeroAlt != null) {
             conn.setInterface(zeroAlt)
             Log.i(TAG, "Reset streaming to alt=0 (zero-bandwidth)")
@@ -268,7 +296,8 @@ class UsbAudioDevice private constructor(private val context: Context) {
             .firstOrNull {
                 it.interfaceClass == UsbConstants.USB_CLASS_AUDIO &&
                     it.interfaceSubclass == 2 &&
-                    it.alternateSetting == bestAlt
+                    it.alternateSetting == bestAlt &&
+                    isPlaybackId(it.id)
             }
         val bestAltOut = bestAltInterface?.let { iface ->
             (0 until iface.endpointCount).map { iface.getEndpoint(it) }
@@ -452,10 +481,12 @@ class UsbAudioDevice private constructor(private val context: Context) {
 
             // Interface descriptor (0x04)
             if (bDescriptorType == 0x04 && bLength >= 9) {
+                val bInterfaceNumber = raw[i + 2].toInt() and 0xFF
                 val bInterfaceClass = raw[i + 5].toInt() and 0xFF
                 val bInterfaceSubClass = raw[i + 6].toInt() and 0xFF
                 val bAlternateSetting = raw[i + 3].toInt() and 0xFF
-                inAudioStreaming = (bInterfaceClass == 1 && bInterfaceSubClass == 2)
+                inAudioStreaming = (bInterfaceClass == 1 && bInterfaceSubClass == 2) &&
+                    isPlaybackId(bInterfaceNumber)
                 if (inAudioStreaming) currentAlt = bAlternateSetting
             }
 
@@ -592,6 +623,10 @@ class UsbAudioDevice private constructor(private val context: Context) {
     /**
      * Close the USB device and release all resources.
      */
+    /** True for the playback AS interface, or for any when it is unknown. */
+    private fun isPlaybackId(interfaceNumber: Int): Boolean =
+        playbackInterfaceId < 0 || interfaceNumber == playbackInterfaceId
+
     fun closeDevice() {
         cachedDeviceInfo = null
         cachedSupportedRates = emptyList()
@@ -607,6 +642,7 @@ class UsbAudioDevice private constructor(private val context: Context) {
         connection?.close()
         connection = null
         currentDevice = null
+        playbackInterfaceId = -1
         Log.i(TAG, "USB device closed")
     }
 
@@ -693,9 +729,10 @@ class UsbAudioDevice private constructor(private val context: Context) {
                 if (bLength < 2 || i + bLength > raw.size) break
                 val bDescriptorType = raw[i + 1].toInt() and 0xFF
                 if (bDescriptorType == 0x04 && bLength >= 9) {
+                    val num = raw[i + 2].toInt() and 0xFF
                     val cls = raw[i + 5].toInt() and 0xFF
                     val sub = raw[i + 6].toInt() and 0xFF
-                    inAudioStreaming = (cls == 1 && sub == 2)
+                    inAudioStreaming = (cls == 1 && sub == 2) && isPlaybackId(num)
                 } else if (inAudioStreaming && bDescriptorType == 0x24 && bLength >= 8) {
                     val subtype = raw[i + 2].toInt() and 0xFF
                     if (subtype == 0x02) { // FORMAT_TYPE
@@ -976,7 +1013,8 @@ class UsbAudioDevice private constructor(private val context: Context) {
             val iface = device.getInterface(i)
             if (iface.interfaceClass == UsbConstants.USB_CLASS_AUDIO &&
                 iface.interfaceSubclass == 2 &&
-                iface.alternateSetting == altSetting) {
+                iface.alternateSetting == altSetting &&
+                isPlaybackId(iface.id)) {
                 val result = conn.setInterface(iface)
                 Log.i(TAG, "setAltSetting($altSetting) via Java API: $result " +
                         "(iface id=${iface.id}, endpoints=${iface.endpointCount})")

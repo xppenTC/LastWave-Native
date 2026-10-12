@@ -501,7 +501,8 @@ class ExclusiveUsbOutput @Inject constructor(
         stopStreamLocked()
         usbAudio.closeDevice()
         connection = null
-        val info = usbAudio.openDevice(usbDevice) ?: return failLocked("openDevice failed")
+        val info = usbAudio.openDevice(usbDevice)
+            ?: return failLocked("openDevice failed" + (usbAudio.lastOpenError?.let { ": $it" } ?: ""))
         val hwRates = usbAudio.querySupportedSampleRates()
 
         var effectiveRate = sampleRate
@@ -579,6 +580,9 @@ class ExclusiveUsbOutput @Inject constructor(
             .firstOrNull {
                 it.interfaceClass == UsbConstants.USB_CLASS_AUDIO &&
                     it.interfaceSubclass == 2 &&
+                    // Playback interface only: headset dongles also expose a
+                    // microphone AS interface with the same alt numbers.
+                    it.id == info.interfaceId &&
                     it.alternateSetting == alt &&
                     it.endpointCount > 0
             }
