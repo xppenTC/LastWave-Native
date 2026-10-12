@@ -212,6 +212,7 @@ class MusicPlayer @Inject constructor(
     private val usbDacMonitor: UsbDacMonitor,
     private val exclusiveUsbOutput: ExclusiveUsbOutput,
     private val songPlayStatsRepository: dagger.Lazy<com.lastwave.app.data.repository.SongPlayStatsRepository>,
+    private val internalDirectOutput: InternalDirectOutput,
 ) {
     private val appContext = context.applicationContext
     /**
@@ -461,6 +462,18 @@ class MusicPlayer @Inject constructor(
     /** True while the usbdevfs exclusive session owns output. */
     @Volatile private var usbExclusiveSinkActive = false
     @Volatile private var usbExclusivePrefEnabled = false
+    /** Fork: "Sortie directe interne" toggle (only effective with Bit-Perfect on). */
+    @Volatile private var internalDirectPrefEnabled = false
+    /** Availability of the internal exclusive endpoint (settings + signal path). */
+    val internalDirectAvailability: StateFlow<InternalDirectAvailability> = internalDirectOutput.availability
+    val internalDirectSession: StateFlow<InternalDirectSession?> = internalDirectOutput.session
+
+    /** Re-checks what the current output accepts (settings / signal-path page opened). */
+    fun refreshInternalDirectAvailability() = internalDirectOutput.refreshAvailability(probe = true)
+
+    fun internalDirectUnderruns(): Long = internalDirectOutput.underruns()
+
+    val isInternalDirectPrefEnabled: Boolean get() = bitPerfectEnabled && internalDirectPrefEnabled
     /** System audio-effects mode pref (Settings -> Experimental, default OFF). */
     @Volatile private var systemEffectsModePref = false
     /** Effective mode: pref ON and on a mixer route (bypass routes suspend). */
@@ -1102,6 +1115,8 @@ class MusicPlayer @Inject constructor(
                     // volume is 0, and a second configure() retunes the clock
                     // to the next track (44.1 PCM written into a 96 kHz alt).
                     exclusiveUsb = if (handleAudioFocus) exclusiveUsbOutput else null,
+                    // Same rule as USB: the crossfade standby never claims the endpoint.
+                    internalDirect = if (handleAudioFocus) internalDirectOutput else null,
                 ).also { sink ->
                     sink.onConfiguredFormat = { rateHz, _, _ ->
                         // The crossfade standby arms early and configures its
@@ -1139,6 +1154,7 @@ class MusicPlayer @Inject constructor(
                     val isSpatial = isSpatialAudioCodec(_state.value.audioCodec)
                     sink.setBitPerfectRequested(!isSpatial && bitPerfectEnabled)
                     sink.syncExclusiveUsb(handleAudioFocus && exclusiveUsbWanted())
+                    sink.syncInternalDirect(handleAudioFocus && !isSpatial && internalDirectWanted())
                     audioSinks.add(sink)
                     runCatching {
                         routedDacDeviceId?.let { id -> findOutputDevice(id)?.let(sink::setPreferredDevice) }
@@ -1657,8 +1673,12 @@ class MusicPlayer @Inject constructor(
                     if (usbExclusivePrefEnabled) {
                         usbExclusivePrefEnabled = false
                     }
+                    internalDirectPrefEnabled = false
                     applicationScope.launch {
                         runCatching { UsbExclusivePrefs.setEnabled(appContext, false) }
+                        runCatching {
+                            com.lastwave.app.playback.usb.InternalDirectPrefs.setEnabled(appContext, false)
+                        }
                     }
                 }
                 onMain {
@@ -1700,6 +1720,36 @@ class MusicPlayer @Inject constructor(
             UsbExclusivePrefs.enabledFlow(appContext).collect { enabled ->
                 usbExclusivePrefEnabled = enabled && bitPerfectEnabled
                 if (usbExclusivePrefEnabled) maybeRequestUsbPermission()
+                onMain {
+                    applyDacRoutingFor(currentSourceRateHz())
+                    updateSignalPath()
+                }
+            }
+        }
+
+        applicationScope.launch {
+            com.lastwave.app.playback.usb.InternalDirectPrefs.enabledFlow(appContext).collect { enabled ->
+                internalDirectPrefEnabled = enabled
+                onMain {
+                    applyDacRoutingFor(currentSourceRateHz())
+                    updateSignalPath()
+                }
+            }
+        }
+
+        applicationScope.launch {
+            com.lastwave.app.playback.usb.InternalDirectPrefs.forceSoftwareVolumeFlow(appContext).collect { force ->
+                exclusiveUsbOutput.setForceSoftwareVolume(force)
+                onMain { updateSignalPath() }
+            }
+        }
+
+        applicationScope.launch {
+            // Route changes (jack, Bluetooth, USB): re-decide which path is wanted.
+            var lastRoute: InternalRoute? = null
+            internalDirectOutput.availability.collect { availability ->
+                if (availability.route == lastRoute) return@collect
+                lastRoute = availability.route
                 onMain {
                     applyDacRoutingFor(currentSourceRateHz())
                     updateSignalPath()
@@ -2843,6 +2893,20 @@ class MusicPlayer @Inject constructor(
         return dac?.hasUsbPeripheral == true && dac.usbPermissionGranted
     }
 
+    /**
+     * Fork: exclusive AAudio (MMAP) on the phone's own output. Same contract as
+     * USB exclusive: Bit-Perfect must be on (it is what turns the DSP off), the
+     * source must be stereo PCM, and a granted USB exclusive session wins.
+     */
+    private fun internalDirectWanted(): Boolean {
+        if (isCasting) return false
+        if (!bitPerfectEnabled || !internalDirectPrefEnabled) return false
+        if (isSpatialAudioCodec(_state.value.audioCodec)) return false
+        if (exclusiveUsbWanted()) return false
+        val route = internalDirectOutput.currentRoute().first
+        return route != InternalRoute.BLUETOOTH && route != InternalRoute.USB
+    }
+
     /** True only for genuine Atmos decode: an E-AC-3 JOC decoder. A plain
      *  `audio/eac3`/`ac3` decoder (common, video-passthrough silicon) cannot
      *  render an Atmos music stream — treating it as capable used to request
@@ -2933,14 +2997,20 @@ class MusicPlayer @Inject constructor(
         val dac = usbDacMonitor.state.value.dac
         val exclusiveWanted = exclusiveUsbWanted()
         exclusiveUsbOutput.setWanted(exclusiveWanted)
+        val internalWanted = !isSpatial && internalDirectWanted()
+        internalDirectOutput.setWanted(internalWanted)
         audioSinks.forEach { sink ->
             sink.setBitPerfectRequested(!isSpatial && bitPerfectEnabled)
             sink.syncExclusiveUsb(exclusiveWanted)
+            sink.syncInternalDirect(internalWanted)
         }
         val exclusive = exclusiveUsbOutput.isActive()
         usbExclusiveSinkActive = exclusive
-        runCatching { audioEffectsEngine.setUsbExclusiveActive(exclusive) }
-        runCatching { secondaryEffects?.setUsbExclusiveActive(exclusive) }
+        // AudioFX on the player session would process nothing on either
+        // exclusive path; the effects engine treats both the same way.
+        val anyExclusive = exclusive || internalDirectOutput.isActive()
+        runCatching { audioEffectsEngine.setUsbExclusiveActive(anyExclusive) }
+        runCatching { secondaryEffects?.setUsbExclusiveActive(anyExclusive) }
         // Same-family fallback for DACs lacking the source rate (88.2 ->
         // 44.1 kHz): the exclusive stream opens at the supported rate with
         // native soxr conversion instead of failing onto the mixer. Null =
@@ -3135,8 +3205,28 @@ class MusicPlayer @Inject constructor(
             appVolume
         }
         exclusiveUsbOutput.syncListeningGain()
+        val internalSession = internalDirectOutput.session.value?.takeIf {
+            audioSinks.any { sink -> runCatching { sink.isInternalDirectActive() }.getOrDefault(false) }
+        }
+        val internalPrefOn = bitPerfectEnabled && internalDirectPrefEnabled
+        val internalFailure = if (!internalPrefOn || internalSession != null || exclusive) {
+            null
+        } else {
+            val availability = internalDirectOutput.availability.value
+            when (availability.reason) {
+                InternalDirectReason.BLUETOOTH, InternalDirectReason.USB -> availability.reason
+                else -> internalDirectOutput.lastFailure
+                    ?: availability.reason.takeUnless {
+                        it == InternalDirectReason.AVAILABLE || it == InternalDirectReason.ACTIVE
+                    }
+            }
+        }
         _signalPath.value = evaluateSignalPath(
             SignalPathInput(
+                internalDirect = internalSession,
+                internalDirectWanted = internalPrefOn,
+                internalDirectFailure = internalFailure,
+                bypassRequested = bitPerfectEnabled,
                 sourceLabel = srcLabel,
                 sourceRateHz = sourceRateHz,
                 // The source row follows the same shared hi-res rule as the pill
