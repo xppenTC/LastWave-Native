@@ -309,4 +309,6 @@
     <string name="signal_detail_bt_codec">Réencodé par le codec Bluetooth (LDAC, aptX…) après le contournement — pas bit-perfect jusqu\'au casque</string>
     <string name="internal_reason_mixed">Android a mixé le flux sur cette sortie — pas de chemin direct ici</string>
     <string name="signal_internal_backend_direct">sortie DIRECT</string>
+    <string name="signal_usb_diag_copy">Copier le diagnostic USB</string>
+    <string name="signal_usb_diag_copied">Diagnostic USB copié — colle-le dans un message</string>
 </resources>

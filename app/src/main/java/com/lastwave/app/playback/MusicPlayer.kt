@@ -1601,13 +1601,15 @@ class MusicPlayer @Inject constructor(
                         lastSignalPathMs = tickerNow
                         val exclusiveRate = exclusiveUsbOutput.currentRateHz()
                         if (exclusiveUsbOutput.isActive() && exclusiveRate > 0) {
-                            healthTracker.sampleExclusive(
+                            val drift = healthTracker.sampleExclusive(
                                 exclusiveUsbOutput.framesWritten(),
                                 exclusiveRate,
                                 tickerNow,
                                 true,
                             )
+                            checkExclusiveHealth(drift)
                         } else {
+                            exclusiveBadDriftTicks = 0
                             healthTracker.sample(pos, tickerNow, true)
                         }
                         updateSignalPath()
@@ -1721,6 +1723,7 @@ class MusicPlayer @Inject constructor(
 
         applicationScope.launch {
             UsbExclusivePrefs.enabledFlow(appContext).collect { enabled ->
+                if (enabled && !usbExclusiveRawPref) exclusiveUsbOutput.clearBlockedDevices()
                 usbExclusiveRawPref = enabled
                 recomputeUsbExclusivePref()
                 if (usbExclusivePrefEnabled) maybeRequestUsbPermission()
@@ -1734,8 +1737,6 @@ class MusicPlayer @Inject constructor(
         applicationScope.launch {
             com.lastwave.app.playback.usb.InternalDirectPrefs.enabledFlow(appContext).collect { enabled ->
                 internalDirectPrefEnabled = enabled
-                recomputeUsbExclusivePref()
-                if (usbExclusivePrefEnabled) maybeRequestUsbPermission()
                 onMain {
                     applyDacRoutingFor(currentSourceRateHz())
                     updateSignalPath()
@@ -2900,6 +2901,38 @@ class MusicPlayer @Inject constructor(
         return dac?.hasUsbPeripheral == true && dac.usbPermissionGranted
     }
 
+    /** Consecutive 1 Hz ticks with an implausible clock on an unconfirmed DAC. */
+    private var exclusiveBadDriftTicks = 0
+
+    /**
+     * Fork safety guard. A DAC whose clock was never confirmed and that
+     * consumes the stream several % away from the configured rate is playing
+     * garbage (seen as loud distorted noise on a UAC1 dongle). Healthy DACs
+     * stay within a few hundred PPM, so 2 % sustained for 2 s is unambiguous.
+     * Only while PCM is actually flowing: a network stall must not trip it.
+     */
+    private fun checkExclusiveHealth(driftPpm: Double?) {
+        if (driftPpm == null || exclusiveUsbOutput.isClockMatched() || !exclusiveUsbOutput.isStreamingAudio()) {
+            exclusiveBadDriftTicks = 0
+            return
+        }
+        if (kotlin.math.abs(driftPpm) < EXCLUSIVE_DRIFT_ABORT_PPM) {
+            exclusiveBadDriftTicks = 0
+            return
+        }
+        exclusiveBadDriftTicks++
+        if (exclusiveBadDriftTicks < EXCLUSIVE_DRIFT_ABORT_TICKS) return
+        exclusiveBadDriftTicks = 0
+        val percent = String.format(java.util.Locale.ROOT, "%.1f", driftPpm / 10_000.0)
+        exclusiveUsbOutput.abortUnhealthy("DAC clock off by $percent %")
+        healthTracker.reset()
+        applyDacRoutingFor(currentSourceRateHz())
+        updateSignalPath()
+    }
+
+    /** Diagnostic text for the signal-path page (USB driver trace + descriptors). */
+    fun usbDiagnosticReport(): String = exclusiveUsbOutput.diagnosticReport()
+
     /**
      * Fork: direct output without usbdevfs (direct AudioTrack, then AAudio
      * MMAP). Bit-Perfect must be on (it is what turns the DSP off). Every route,
@@ -2917,11 +2950,11 @@ class MusicPlayer @Inject constructor(
      * Effective USB exclusive wish, recomputed whenever an input changes. The
      * old code captured "enabled && bitPerfectEnabled" once: when the pref
      * flow emitted before the settings flow at startup, USB exclusive stayed
-     * off for the whole session. The internal direct toggle implies it too —
-     * "bypass the mixer" has to cover a USB DAC.
+     * off for the whole session. It follows its own toggle only, so turning
+     * "USB Exclusive Output" off always stops usbdevfs.
      */
     private fun recomputeUsbExclusivePref() {
-        usbExclusivePrefEnabled = bitPerfectEnabled && (usbExclusiveRawPref || internalDirectPrefEnabled)
+        usbExclusivePrefEnabled = bitPerfectEnabled && usbExclusiveRawPref
     }
 
     /** True only for genuine Atmos decode: an E-AC-3 JOC decoder. A plain
@@ -7096,6 +7129,8 @@ class MusicPlayer @Inject constructor(
     }
 
     companion object {
+        private const val EXCLUSIVE_DRIFT_ABORT_PPM = 20_000.0
+        private const val EXCLUSIVE_DRIFT_ABORT_TICKS = 2
         /**
          * Fallback target when the DAC descriptor lacks the source rate.
          * Resamples to a clock rate supported by the DAC (including 48kHz, 96kHz, etc.)

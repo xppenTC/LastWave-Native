@@ -3496,6 +3496,7 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
             internalAvailability = internalAvailability,
             internalEnabled = player.isInternalDirectPrefEnabled,
             internalUnderruns = if (signalPath.internalDirectActive) player.internalDirectUnderruns() else null,
+            usbDiagnostic = if (dac != null) player::usbDiagnosticReport else null,
         )
     }
 }

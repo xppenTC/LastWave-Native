@@ -379,4 +379,6 @@
     <string name="signal_detail_bt_codec">Re-encoded by the Bluetooth codec (LDAC, aptX…) after the bypass — not bit-perfect to the headphones</string>
     <string name="internal_reason_mixed">Android mixed the stream on this output — no direct path here</string>
     <string name="signal_internal_backend_direct">DIRECT output</string>
+    <string name="signal_usb_diag_copy">Copy USB diagnostic</string>
+    <string name="signal_usb_diag_copied">USB diagnostic copied — paste it in a message</string>
 </resources>

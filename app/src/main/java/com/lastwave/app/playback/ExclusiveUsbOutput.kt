@@ -479,6 +479,10 @@ class ExclusiveUsbOutput @Inject constructor(
             }
         } ?: return failLocked("no USB audio device")
         if (!manager.hasPermission(usbDevice)) return failLocked("USB permission missing")
+        blockReasonFor(usbDevice.vendorId, usbDevice.productId)?.let { reason ->
+            return failLocked("disabled for this DAC after a failed test ($reason) — turn USB Exclusive off and on to retry")
+        }
+        currentDeviceKey = "${usbDevice.vendorId}:${usbDevice.productId}"
 
         val bits = if (sourceBits > 0) sourceBits else (if (floatSource) 24 else 16)
         val reuse = stream
@@ -530,7 +534,7 @@ class ExclusiveUsbOutput @Inject constructor(
             }
         }
 
-        var (alt, wireBits) = usbAudio.findAltSettingForBitDepth(effectiveBits)
+        var (alt, wireBits) = usbAudio.findAltSetting(effectiveBits, effectiveRate)
         var rateSetBefore = usbAudio.setSampleRate(effectiveRate)
         if (!usbAudio.setAltSetting(alt)) return failLocked("setAltSetting $alt failed")
         var reported = usbAudio.readSampleRate()
@@ -565,7 +569,7 @@ class ExclusiveUsbOutput @Inject constructor(
             effectiveFloatSource = true
             effectiveEncoding = C.ENCODING_PCM_FLOAT
             autoNegotiatedFallback = true
-            val updatedAlt = usbAudio.findAltSettingForBitDepth(effectiveBits)
+            val updatedAlt = usbAudio.findAltSetting(effectiveBits, effectiveRate)
             if (updatedAlt.first != alt) {
                 if (usbAudio.setAltSetting(updatedAlt.first)) {
                     alt = updatedAlt.first
@@ -673,8 +677,54 @@ class ExclusiveUsbOutput @Inject constructor(
             TAG,
             "exclusive volume hardware=$hardwareVolume listening=$listeningGain softwareGain=$softwareGainValue",
         )
+        sessionSummary = "started rate=${effectiveRate}Hz alt=$alt wireBits=$wireBits reported=$reported " +
+            "clockMatched=$clockMatched fallback=$autoNegotiatedFallback hardwareVolume=$hardwareVolume " +
+            "maxPacket=$maxPacket interval=$dataInterval feedback=${selectedFeedback != null}"
         startWriterLocked(created)
         return true
+    }
+
+    // ── Fork: safety guard + diagnostics ──
+
+    @Volatile private var currentDeviceKey: String? = null
+    @Volatile private var sessionSummary: String = ""
+
+    private fun blockReasonFor(vendorId: Int, productId: Int): String? =
+        volumePrefs.getString("$KEY_BLOCK_PREFIX$vendorId:$productId", null)
+
+    /** Forget every DAC the guard disabled (USB Exclusive toggled off then on). */
+    fun clearBlockedDevices() {
+        val editor = volumePrefs.edit()
+        volumePrefs.all.keys.filter { it.startsWith(KEY_BLOCK_PREFIX) }.forEach { editor.remove(it) }
+        editor.apply()
+    }
+
+    /**
+     * The DAC is not consuming the stream at the rate it was configured for
+     * and its clock was never confirmed: what it plays is garbage (loud noise
+     * on a UAC1 dongle in the field). Stop now, remember the DAC so the next
+     * track does not blast it again, and let the sink fall back.
+     */
+    fun abortUnhealthy(reason: String) {
+        synchronized(lock) {
+            if (!active) return
+            val key = currentDeviceKey
+            Log.w(TAG, "Exclusive USB aborted: $reason (device $key)")
+            if (key != null) {
+                runCatching { volumePrefs.edit().putString("$KEY_BLOCK_PREFIX$key", reason).apply() }
+            }
+            failLocked("stopped for safety: $reason")
+        }
+    }
+
+    /** Text for the signal-path "copy USB diagnostic" button. */
+    fun diagnosticReport(): String = buildString {
+        append("LastWave Bypass USB diagnostic\n")
+        append("active=$active wanted=$wanted rate=$configuredRateHz clockMatched=$clockMatched ")
+        append("hardwareVolume=$hardwareVolume forceSoftwareVolume=$forceSoftwareVolume\n")
+        if (sessionSummary.isNotEmpty()) append(sessionSummary).append('\n')
+        lastFailureReason?.let { append("lastFailure=").append(it).append('\n') }
+        append(runCatching { usbAudio.diagnosticReport() }.getOrDefault(""))
     }
 
     @Volatile private var currentFallbackNegotiated = false
@@ -866,6 +916,7 @@ class ExclusiveUsbOutput @Inject constructor(
         const val VOLUME_CHANGED_ACTION = "android.media.VOLUME_CHANGED_ACTION"
         const val EXTRA_VOLUME_STREAM_TYPE = "android.media.EXTRA_VOLUME_STREAM_TYPE"
         const val KEY_LAST_NON_MAX_GAIN = "last_non_max_stream_gain"
+        const val KEY_BLOCK_PREFIX = "blocked_dac_"
         const val PLL_SETTLE_MS = 50L
         const val CLOCK_VALID_TRIES = 40
         const val CLOCK_VALID_STEP_MS = 5L
