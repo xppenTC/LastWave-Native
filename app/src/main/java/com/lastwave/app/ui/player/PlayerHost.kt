@@ -3364,6 +3364,7 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
             signalPath.internalDirectActive,
             signalPath.usbExclusiveActive,
             signalPath.bypassRequested,
+            signalPath.internalSession,
             modeBitPerfect,
         ) {
             val base = qualityBadgeLabel(state)
@@ -3376,6 +3377,7 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
             // user asked for a bypass that is not happening, so it is never noise.
             val mode = when {
                 signalPath.bitPerfect -> modeBitPerfect
+                signalPath.internalDirectActive && signalPath.internalSession?.directVerified == false -> "$modeDirect?"
                 signalPath.internalDirectActive -> modeDirect
                 signalPath.bypassRequested && !signalPath.usbExclusiveActive -> modeMixer
                 else -> null

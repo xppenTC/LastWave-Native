@@ -857,6 +857,15 @@ class NativeProcessingAudioSink(
 
     fun isInternalDirectActive(): Boolean = internalActive
 
+    /**
+     * The audio route changed (Bluetooth, jack…): a previous refusal or a lost
+     * stream may not apply to the new output, so allow one fresh attempt at
+     * the next buffer boundary.
+     */
+    fun retryInternalDirect() {
+        internalStartFailed = false
+    }
+
     /** MusicPlayer pushes "toggle on + route eligible + Bit-Perfect on" here. */
     fun syncInternalDirect(wanted: Boolean) {
         val wasWanted = internalWanted

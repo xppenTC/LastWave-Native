@@ -135,4 +135,87 @@ class InternalDirectSignalPathTest {
         assertThat(InternalDirectOutput.classify(android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES))
             .isEqualTo(InternalRoute.WIRED)
     }
+
+    private fun trackSession(route: InternalRoute, verified: Boolean) = session(
+        sourceRate = 44_100,
+        sourceEnc = InternalDirectStream.ENC_I16,
+        sourceBits = 16,
+        deviceRate = 44_100,
+        deviceEnc = InternalDirectStream.ENC_I24,
+        formatConverted = true,
+        formatLossless = true,
+    ).copy(route = route, backend = InternalBackend.DIRECT_TRACK, directVerified = verified, mmap = false)
+
+    @Test
+    fun verifiedDirectTrackOnJackIsDirectToHal() {
+        val report = evaluateSignalPath(input(trackSession(InternalRoute.WIRED, verified = true)))
+        assertThat(report.directToHal).isTrue()
+        assertThat(report.bitPerfect).isFalse()
+    }
+
+    @Test
+    fun unverifiedDirectTrackNeverClaimsTheBypass() {
+        val report = evaluateSignalPath(input(trackSession(InternalRoute.WIRED, verified = false)))
+        assertThat(report.directToHal).isFalse()
+        assertThat(report.checks.first { it.labelRes == com.lastwave.app.R.string.signal_label_mixer }.passed)
+            .isFalse()
+    }
+
+    @Test
+    fun bluetoothBypassStillReportsTheCodec() {
+        val report = evaluateSignalPath(input(trackSession(InternalRoute.BLUETOOTH, verified = true)))
+        assertThat(report.internalDirectActive).isTrue()
+        assertThat(report.checks.first { it.labelRes == com.lastwave.app.R.string.signal_label_mixer }.passed)
+            .isTrue()
+        assertThat(report.checks.first { it.labelRes == com.lastwave.app.R.string.signal_label_bt_codec }.passed)
+            .isFalse()
+        assertThat(report.directToHal).isFalse()
+    }
+
+    @Test
+    fun wireEncodingFollowsUappRecipe() {
+        assertThat(DirectTrackStream.wireEncodingFor(InternalDirectStream.ENC_I16, 16)).isEqualTo(InternalDirectStream.ENC_I24)
+        assertThat(DirectTrackStream.wireEncodingFor(InternalDirectStream.ENC_I24, 24)).isEqualTo(InternalDirectStream.ENC_I24)
+        assertThat(DirectTrackStream.wireEncodingFor(InternalDirectStream.ENC_I32, 24)).isEqualTo(InternalDirectStream.ENC_I24)
+        assertThat(DirectTrackStream.wireEncodingFor(InternalDirectStream.ENC_I32, 32)).isEqualTo(InternalDirectStream.ENC_I32)
+        assertThat(DirectTrackStream.wireEncodingFor(InternalDirectStream.ENC_FLOAT, 32)).isEqualTo(InternalDirectStream.ENC_I24)
+    }
+
+    private fun le(size: Int) = java.nio.ByteBuffer.allocate(size).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+
+    @Test
+    fun sixteenBitWidensExactlyTo24() {
+        val src = le(8).putShort(32767).putShort(-32768).putShort(1).putShort(-1).flip() as java.nio.ByteBuffer
+        val out = DirectTrackStream.convert(src, InternalDirectStream.ENC_I16, InternalDirectStream.ENC_I24, le(64))!!
+        assertThat(src.hasRemaining()).isFalse()
+        assertThat(out.remaining()).isEqualTo(12)
+        val expected = intArrayOf(32767 * 256, -32768 * 256, 256, -256)
+        for (e in expected) {
+            val b0 = out.get().toInt() and 0xFF
+            val b1 = out.get().toInt() and 0xFF
+            val b2 = out.get().toInt()
+            assertThat(b0 or (b1 shl 8) or (b2 shl 16)).isEqualTo(e)
+        }
+    }
+
+    @Test
+    fun thirtyTwoBitWordsWith24BitContentKeepEveryBit() {
+        val src = le(8).putInt(0x12345600).putInt(0xFEDCBA00.toInt()).flip() as java.nio.ByteBuffer
+        val out = DirectTrackStream.convert(src, InternalDirectStream.ENC_I32, InternalDirectStream.ENC_I24, le(64))!!
+        val bytes = ByteArray(out.remaining()).also { out.get(it) }
+        assertThat(bytes.map { it.toInt() and 0xFF }).containsExactly(0x56, 0x34, 0x12, 0xBA, 0xDC, 0xFE).inOrder()
+    }
+
+    @Test
+    fun floatIsRoundedAndClippedTo24() {
+        val src = le(12).putFloat(1.5f).putFloat(-1.0f).putFloat(0.5f).flip() as java.nio.ByteBuffer
+        val out = DirectTrackStream.convert(src, InternalDirectStream.ENC_FLOAT, InternalDirectStream.ENC_I24, le(64))!!
+        val values = (0 until 3).map {
+            val b0 = out.get().toInt() and 0xFF
+            val b1 = out.get().toInt() and 0xFF
+            val b2 = out.get().toInt()
+            b0 or (b1 shl 8) or (b2 shl 16)
+        }
+        assertThat(values).containsExactly(8_388_607, -8_388_608, 4_194_304).inOrder()
+    }
 }

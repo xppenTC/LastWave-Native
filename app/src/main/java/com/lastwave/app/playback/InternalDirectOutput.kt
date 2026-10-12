@@ -34,6 +34,14 @@ import javax.inject.Singleton
 /** Where Android currently sends media audio, as far as this feature cares. */
 enum class InternalRoute { SPEAKER, WIRED, BLUETOOTH, USB, OTHER, UNKNOWN }
 
+/** How the mixer is bypassed. */
+enum class InternalBackend {
+    /** Vendor `direct_pcm_out` profile via a 24-bit AudioTrack (UAPP HiRes Direct recipe). */
+    DIRECT_TRACK,
+    /** AAudio EXCLUSIVE (MMAP) stream — fallback, often fixed at 48 kHz. */
+    MMAP,
+}
+
 /** Why the internal direct output is (un)available on the current route. */
 enum class InternalDirectReason {
     AVAILABLE,
@@ -45,6 +53,8 @@ enum class InternalDirectReason {
     NO_AAUDIO,
     ANDROID_TOO_OLD,
     NATIVE_MISSING,
+    /** Android accepted the track but mixed it anyway: no direct profile for it here. */
+    MIXED_BY_ANDROID,
 }
 
 data class InternalDirectAvailability(
@@ -57,7 +67,7 @@ data class InternalDirectAvailability(
         get() = reason == InternalDirectReason.AVAILABLE || reason == InternalDirectReason.ACTIVE
 }
 
-/** The exclusive stream actually playing, for the signal-path page and the badge. */
+/** The direct stream actually playing, for the signal-path page and the badge. */
 data class InternalDirectSession(
     val route: InternalRoute,
     val routeName: String,
@@ -72,22 +82,25 @@ data class InternalDirectSession(
     val formatLossless: Boolean,
     val mmap: Boolean,
     val deviceBufferFrames: Int,
+    val backend: InternalBackend = InternalBackend.MMAP,
+    /** DIRECT_TRACK: Android itself confirmed the track is not mixed. MMAP: exclusivity verified. */
+    val directVerified: Boolean = true,
 )
 
 /**
  * "Bypass the Android mixer without a USB DAC" (UAPP-style HiRes Direct).
  *
- * Opens an AAudio EXCLUSIVE stream on the phone's own output (speaker, wired
- * jack). Exclusive AAudio streams are memory-mapped (MMAP): the app writes into
- * the HAL buffer and AudioFlinger's mixer, resampler and effects never see the
- * samples. This is the only public, root-free way to do it. What it cannot do:
- *  - Bluetooth: the codec (SBC/AAC/LDAC…) re-encodes everything; no MMAP path.
- *  - USB DACs: handled by the existing usbdevfs exclusive output instead.
- *  - Vendor DSP after the HAL (speaker protection, OEM effects running in the
- *    audio DSP) is outside Android's reach, so this is reported as "direct to
- *    HAL", never as verified bit-perfect.
+ * Two backends, tried in this order:
+ *  1. [DirectTrackStream]: a 24-bit packed music AudioTrack at the source rate.
+ *     Vendor policies (Qualcomm `direct_pcm_out`) put it on a DIRECT output
+ *     that AudioFlinger never mixes — speaker, jack AND Bluetooth A2DP, 44.1 to
+ *     384 kHz. Verified per track (Android refuses rate changes on direct tracks).
+ *  2. AAudio EXCLUSIVE (MMAP) via [InternalDirectStream]: writes into the HAL
+ *     buffer. Usually fixed at 48 kHz, so 44.1 kHz sources get resampled (soxr).
  *
- * Fails closed: every refusal leaves playback on the regular mixer path.
+ * Limits that remain: USB DACs use the usbdevfs exclusive output; on Bluetooth
+ * the codec still re-encodes after the bypass; a vendor DSP after the HAL is
+ * unverifiable. Fails closed: every refusal keeps the regular mixer path.
  */
 @Singleton
 class InternalDirectOutput @Inject constructor(
@@ -100,6 +113,7 @@ class InternalDirectOutput @Inject constructor(
 
     @Volatile private var wanted = false
     @Volatile private var stream: InternalDirectStream? = null
+    @Volatile private var track: DirectTrackStream? = null
 
     @Volatile private var activeSourceRateHz = 0
     @Volatile private var activeSourceEncoding = -1
@@ -115,8 +129,10 @@ class InternalDirectOutput @Inject constructor(
     @Volatile private var lastBufferedSeenMs = 0L
     @Volatile private var playing = false
 
-    /** Per-route outcome cache: "srcRate/srcEnc" -> chosen (rate, encoding) or null when refused. */
+    /** MMAP per-route outcome cache: "srcRate/srcEnc" -> chosen (rate, encoding) or null when refused. */
     private val openCache = HashMap<String, Pair<Int, Int>?>()
+    /** Routes ("route|rate|enc") where Android mixed the direct track: skip straight to MMAP. */
+    private val mixedRoutes: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     @Volatile private var cachedProbe: InternalDirectStream.Probe? = null
     private var probeJob: Job? = null
 
@@ -139,7 +155,7 @@ class InternalDirectOutput @Inject constructor(
 
     init {
         runCatching { audioManager?.registerAudioDeviceCallback(deviceCallback, Handler(Looper.getMainLooper())) }
-        // Route only: the endpoint is probed lazily (settings screen open or
+        // Route only: the MMAP endpoint is probed lazily (settings open or
         // feature enabled), never at app start for users who keep it off.
         refreshAvailability(probe = false)
     }
@@ -158,16 +174,22 @@ class InternalDirectOutput @Inject constructor(
 
     fun isActive(): Boolean = _session.value != null && isAlive()
 
-    fun hasOpenStream(): Boolean = stream != null
+    fun hasOpenStream(): Boolean = stream != null || track != null
 
-    fun isAlive(): Boolean = stream?.counters()?.getOrNull(3) == 1L
+    fun isAlive(): Boolean {
+        track?.let { return it.isAlive() }
+        return stream?.counters()?.getOrNull(3) == 1L
+    }
 
-    /** Rate the stream consumes (after any app-side resampling). 0 when idle. */
+    /** Rate the output consumes (after any app-side resampling). 0 when idle. */
     fun deviceRateHz(): Int = if (_session.value != null) deviceRateHz else 0
 
     fun requiresResampling(): Boolean = _session.value?.resampled == true
 
-    fun underruns(): Long = stream?.counters()?.getOrNull(2) ?: 0L
+    fun underruns(): Long {
+        track?.let { return it.underruns() }
+        return stream?.counters()?.getOrNull(2) ?: 0L
+    }
 
     /** Current route as Android reports it for media playback. */
     fun currentRoute(): Pair<InternalRoute, String> {
@@ -184,28 +206,35 @@ class InternalDirectOutput @Inject constructor(
     }
 
     /**
-     * Re-evaluates the route and, when the route allows it, re-probes the
-     * exclusive endpoint in the background (debounced). Never probes while
-     * our own stream holds the endpoint.
+     * Re-evaluates the route. With the direct-track backend (Android 12+) every
+     * non-USB route is worth trying: the verdict comes from the track itself
+     * during playback. Older systems probe the MMAP endpoint (debounced).
      */
     fun refreshAvailability(
         probe: Boolean = wanted || _availability.subscriptionCount.value > 0,
     ) {
         val (route, name) = currentRoute()
         val early = when {
-            !NATIVE_OK -> InternalDirectReason.NATIVE_MISSING
-            Build.VERSION.SDK_INT < Build.VERSION_CODES.P -> InternalDirectReason.ANDROID_TOO_OLD
-            route == InternalRoute.BLUETOOTH -> InternalDirectReason.BLUETOOTH
             route == InternalRoute.USB -> InternalDirectReason.USB
             _session.value != null -> InternalDirectReason.ACTIVE
+            DIRECT_TRACK_OK -> {
+                val key = route.name
+                if (mixedRoutes.any { it.startsWith("$key|") } && cachedProbe?.usable != true) {
+                    InternalDirectReason.MIXED_BY_ANDROID
+                } else {
+                    InternalDirectReason.AVAILABLE
+                }
+            }
+            !NATIVE_OK -> InternalDirectReason.NATIVE_MISSING
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.P -> InternalDirectReason.ANDROID_TOO_OLD
             else -> null
         }
         if (early != null) {
             _availability.value = InternalDirectAvailability(route, name, early, cachedProbe)
             return
         }
-        cachedProbe?.let { probe ->
-            _availability.value = InternalDirectAvailability(route, name, reasonFor(probe), probe)
+        cachedProbe?.let { probeResult ->
+            _availability.value = InternalDirectAvailability(route, name, reasonFor(probeResult), probeResult)
             return
         }
         _availability.value = InternalDirectAvailability(route, name, InternalDirectReason.CHECKING)
@@ -220,7 +249,6 @@ class InternalDirectOutput @Inject constructor(
             if (result != null) cachedProbe = result
             _availability.value = when {
                 _session.value != null -> InternalDirectAvailability(r, n, InternalDirectReason.ACTIVE, cachedProbe)
-                r == InternalRoute.BLUETOOTH -> InternalDirectAvailability(r, n, InternalDirectReason.BLUETOOTH)
                 r == InternalRoute.USB -> InternalDirectAvailability(r, n, InternalDirectReason.USB)
                 result == null -> InternalDirectAvailability(r, n, InternalDirectReason.NATIVE_MISSING)
                 else -> InternalDirectAvailability(r, n, reasonFor(result), result)
@@ -228,12 +256,7 @@ class InternalDirectOutput @Inject constructor(
         }
     }
 
-    /**
-     * Opens (or reuses) the exclusive stream for [format]. Order of attempts:
-     * 1. source rate + source encoding (bit-exact into the HAL buffer);
-     * 2. source rate + the endpoint's native encoding (format change only);
-     * 3. the endpoint's native rate + encoding (the sink resamples with soxr).
-     */
+    /** Opens (or reuses) a direct output for [format]: direct track first, then MMAP. */
     fun configure(format: Format, bitDepthHint: Int?): Boolean {
         if (!wanted) return false
         if (format.sampleMimeType != MimeTypes.AUDIO_RAW || format.sampleRate <= 0 ||
@@ -241,89 +264,185 @@ class InternalDirectOutput @Inject constructor(
         ) return false
         val srcEnc = encodingOf(format.pcmEncoding) ?: return false
         val (route, routeName) = currentRoute()
-        when (route) {
-            InternalRoute.BLUETOOTH -> return fail(InternalDirectReason.BLUETOOTH)
-            InternalRoute.USB -> return fail(InternalDirectReason.USB)
-            else -> Unit
-        }
-        if (!NATIVE_OK) return fail(InternalDirectReason.NATIVE_MISSING)
+        if (route == InternalRoute.USB) return fail(InternalDirectReason.USB)
+        val sourceBits = effectiveBits(srcEnc, bitDepthHint)
+        var mixed = false
         synchronized(openLock) {
-            val current = stream
-            if (current != null && _session.value != null && current.counters()[3] == 1L &&
-                activeSourceRateHz == format.sampleRate && activeSourceEncoding == srcEnc &&
-                activeSourceChannels == format.channelCount
-            ) {
-                // Same wire configuration: keep the endpoint (no reopen gap).
-                current.pause()
-                current.flush()
-                playing = false
-                rebaseClock()
-                lastFailure = null
-                return true
-            }
+            if (reuseLocked(format, srcEnc)) return true
             closeLocked()
-            val created = InternalDirectStream()
-            if (!created.isAvailable) {
-                created.close()
-                return fail(InternalDirectReason.NATIVE_MISSING)
+            if (DIRECT_TRACK_OK) {
+                when (openDirectTrackLocked(format, srcEnc, sourceBits, route, routeName)) {
+                    TrackOutcome.ENGAGED -> {
+                        lastFailure = null
+                        return true.also { scope.launch { refreshAvailability() } }
+                    }
+                    TrackOutcome.MIXED -> mixed = true
+                    TrackOutcome.FAILED -> Unit
+                }
             }
-            val key = "${format.sampleRate}/$srcEnc"
-            val remembered = openCache[key]
-            val chosen: Pair<Int, Int>? = when {
-                // This route already refused this source format: don't retry every track.
-                openCache.containsKey(key) && remembered == null -> null
-                remembered != null &&
-                    created.open(remembered.first, OUT_CHANNELS, remembered.second) == InternalDirectStream.OPEN_OK ->
-                    remembered
-                else -> negotiate(created, format.sampleRate, srcEnc).also { openCache[key] = it }
-            }
-            if (chosen == null) {
-                created.close()
+            if (!NATIVE_OK) return fail(if (mixed) InternalDirectReason.MIXED_BY_ANDROID else InternalDirectReason.NATIVE_MISSING)
+            val engaged = openMmapLocked(format, srcEnc, sourceBits, route, routeName)
+            if (!engaged) {
                 val probe = cachedProbe
                 return fail(
-                    if (probe == null || probe.status != 0) InternalDirectReason.NO_AAUDIO
-                    else InternalDirectReason.EXCLUSIVE_REFUSED,
+                    when {
+                        mixed -> InternalDirectReason.MIXED_BY_ANDROID
+                        probe == null || probe.status != 0 -> InternalDirectReason.NO_AAUDIO
+                        else -> InternalDirectReason.EXCLUSIVE_REFUSED
+                    },
                 )
             }
-            val info = created.info()
-            stream = created
-            activeSourceRateHz = format.sampleRate
-            activeSourceEncoding = srcEnc
-            activeSourceChannels = format.channelCount
-            deviceRateHz = chosen.first
-            deviceEncoding = chosen.second
-            deviceChannels = info?.channelCount ?: OUT_CHANNELS
-            deviceBufferFrames = info?.deviceBufferFrames ?: 0
-            playing = false
-            rebaseClock()
-            val sourceBits = effectiveBits(srcEnc, bitDepthHint)
-            val resampled = chosen.first != format.sampleRate
-            // Resampled audio reaches the stream as Float32 from soxr.
-            val wireInput = if (resampled) InternalDirectStream.ENC_FLOAT else srcEnc
-            _session.value = InternalDirectSession(
-                route = route,
-                routeName = routeName,
-                sourceRateHz = format.sampleRate,
-                sourceEncoding = srcEnc,
-                sourceBits = sourceBits,
-                deviceRateHz = chosen.first,
-                deviceEncoding = chosen.second,
-                deviceChannels = deviceChannels,
-                resampled = resampled,
-                formatConverted = wireInput != chosen.second || format.channelCount != deviceChannels,
-                formatLossless = !resampled && isLossless(srcEnc, sourceBits, chosen.second),
-                mmap = info?.mmap == true,
-                deviceBufferFrames = deviceBufferFrames,
-            )
             lastFailure = null
-            Log.i(
-                TAG,
-                "INTERNAL DIRECT engaged route=$route src=${format.sampleRate}Hz/" +
-                    "${InternalDirectStream.labelOf(srcEnc)} -> device=${chosen.first}Hz/" +
-                    "${InternalDirectStream.labelOf(chosen.second)} resampled=$resampled mmap=${info?.mmap}",
-            )
         }
         refreshAvailability()
+        return true
+    }
+
+    private enum class TrackOutcome { ENGAGED, MIXED, FAILED }
+
+    /** Same wire configuration and still alive: keep the output (no reopen gap). */
+    private fun reuseLocked(format: Format, srcEnc: Int): Boolean {
+        if (_session.value == null || !isAlive()) return false
+        if (activeSourceRateHz != format.sampleRate || activeSourceEncoding != srcEnc ||
+            activeSourceChannels != format.channelCount
+        ) return false
+        track?.let {
+            it.pause()
+            it.flush()
+        }
+        stream?.let {
+            it.pause()
+            it.flush()
+        }
+        playing = false
+        rebaseClock()
+        lastFailure = null
+        return true
+    }
+
+    private fun openDirectTrackLocked(
+        format: Format,
+        srcEnc: Int,
+        sourceBits: Int,
+        route: InternalRoute,
+        routeName: String,
+    ): TrackOutcome {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return TrackOutcome.FAILED
+        val wire = DirectTrackStream.wireEncodingFor(srcEnc, sourceBits)
+        val key = "${route.name}|${format.sampleRate}|$wire"
+        if (key in mixedRoutes) return TrackOutcome.MIXED
+        val created = DirectTrackStream(MEDIA_ATTRIBUTES)
+        if (!created.open(format.sampleRate, format.channelCount, wire)) {
+            created.release()
+            return TrackOutcome.FAILED
+        }
+        val direct = created.probeDirect()
+        if (direct == false) {
+            // Android mixes it like any other track: no gain over the normal path.
+            Log.w(TAG, "direct track mixed by Android on $route (${format.sampleRate}Hz ${InternalDirectStream.labelOf(wire)})")
+            created.release()
+            mixedRoutes += key
+            return TrackOutcome.MIXED
+        }
+        track = created
+        activeSourceRateHz = format.sampleRate
+        activeSourceEncoding = srcEnc
+        activeSourceChannels = format.channelCount
+        deviceRateHz = format.sampleRate
+        deviceEncoding = wire
+        deviceChannels = format.channelCount
+        deviceBufferFrames = 0
+        playing = false
+        rebaseClock()
+        _session.value = InternalDirectSession(
+            route = route,
+            routeName = created.routedDeviceName()?.takeIf { it.isNotBlank() } ?: routeName,
+            sourceRateHz = format.sampleRate,
+            sourceEncoding = srcEnc,
+            sourceBits = sourceBits,
+            deviceRateHz = format.sampleRate,
+            deviceEncoding = wire,
+            deviceChannels = format.channelCount,
+            resampled = false,
+            formatConverted = wire != srcEnc,
+            formatLossless = isLossless(srcEnc, sourceBits, wire),
+            mmap = false,
+            deviceBufferFrames = 0,
+            backend = InternalBackend.DIRECT_TRACK,
+            directVerified = direct == true,
+        )
+        Log.i(
+            TAG,
+            "INTERNAL DIRECT (track) engaged route=$route ${format.sampleRate}Hz " +
+                "${InternalDirectStream.labelOf(srcEnc)} -> ${InternalDirectStream.labelOf(wire)} " +
+                "verified=${direct == true}",
+        )
+        return TrackOutcome.ENGAGED
+    }
+
+    private fun openMmapLocked(
+        format: Format,
+        srcEnc: Int,
+        sourceBits: Int,
+        route: InternalRoute,
+        routeName: String,
+    ): Boolean {
+        val created = InternalDirectStream()
+        if (!created.isAvailable) {
+            created.close()
+            return false
+        }
+        val key = "${format.sampleRate}/$srcEnc"
+        val remembered = openCache[key]
+        val chosen: Pair<Int, Int>? = when {
+            // This route already refused this source format: don't retry every track.
+            openCache.containsKey(key) && remembered == null -> null
+            remembered != null &&
+                created.open(remembered.first, OUT_CHANNELS, remembered.second) == InternalDirectStream.OPEN_OK ->
+                remembered
+            else -> negotiate(created, format.sampleRate, srcEnc).also { openCache[key] = it }
+        }
+        if (chosen == null) {
+            created.close()
+            return false
+        }
+        val info = created.info()
+        stream = created
+        activeSourceRateHz = format.sampleRate
+        activeSourceEncoding = srcEnc
+        activeSourceChannels = format.channelCount
+        deviceRateHz = chosen.first
+        deviceEncoding = chosen.second
+        deviceChannels = info?.channelCount ?: OUT_CHANNELS
+        deviceBufferFrames = info?.deviceBufferFrames ?: 0
+        playing = false
+        rebaseClock()
+        val resampled = chosen.first != format.sampleRate
+        // Resampled audio reaches the stream as Float32 from soxr.
+        val wireInput = if (resampled) InternalDirectStream.ENC_FLOAT else srcEnc
+        _session.value = InternalDirectSession(
+            route = route,
+            routeName = routeName,
+            sourceRateHz = format.sampleRate,
+            sourceEncoding = srcEnc,
+            sourceBits = sourceBits,
+            deviceRateHz = chosen.first,
+            deviceEncoding = chosen.second,
+            deviceChannels = deviceChannels,
+            resampled = resampled,
+            formatConverted = wireInput != chosen.second || format.channelCount != deviceChannels,
+            formatLossless = !resampled && isLossless(srcEnc, sourceBits, chosen.second),
+            mmap = info?.mmap == true,
+            deviceBufferFrames = deviceBufferFrames,
+            backend = InternalBackend.MMAP,
+            directVerified = true,
+        )
+        Log.i(
+            TAG,
+            "INTERNAL DIRECT (mmap) engaged route=$route src=${format.sampleRate}Hz/" +
+                "${InternalDirectStream.labelOf(srcEnc)} -> device=${chosen.first}Hz/" +
+                "${InternalDirectStream.labelOf(chosen.second)} resampled=$resampled mmap=${info?.mmap}",
+        )
         return true
     }
 
@@ -347,13 +466,24 @@ class InternalDirectOutput @Inject constructor(
     }
 
     /**
-     * Writes interleaved PCM in [inputEncoding] (Media3 C.ENCODING_*). Advances
+     * Writes interleaved PCM in [media3Encoding] (Media3 C.ENCODING_*). Advances
      * [buffer] by what was queued. True when the whole buffer was taken.
      */
     fun write(buffer: ByteBuffer, presentationTimeUs: Long, media3Encoding: Int, channels: Int): Boolean {
-        val target = stream ?: return false
         if (!buffer.hasRemaining()) return true
         val enc = encodingOf(media3Encoding) ?: return false
+        track?.let { direct ->
+            val anchor = if (startNeedsInit) direct.playedFrames() else 0L
+            val before = buffer.position()
+            val done = direct.write(buffer, enc, channels)
+            if (startNeedsInit && (done || buffer.position() != before)) {
+                startMediaTimeUs = presentationTimeUs.coerceAtLeast(0L)
+                baseConsumedFrames = anchor
+                startNeedsInit = false
+            }
+            return done
+        }
+        val target = stream ?: return false
         // Anchor the clock on the first frames actually accepted: right after a
         // flush the RT callback may still be dropping the old backlog.
         val anchorConsumed = if (startNeedsInit) target.counters()[0] else 0L
@@ -374,30 +504,38 @@ class InternalDirectOutput @Inject constructor(
 
     fun play() {
         playing = true
+        track?.play()
         stream?.start()
     }
 
     fun pause() {
         playing = false
+        track?.pause()
         stream?.pause()
     }
 
     /** Seek/stop: drop everything queued and re-anchor the media clock on the next write. */
     fun flush() {
+        track?.flush()
         stream?.flush()
         rebaseClock()
     }
 
     fun getCurrentPositionUs(): Long {
-        val target = stream ?: return AudioSink.CURRENT_POSITION_NOT_SET
         if (startNeedsInit || deviceRateHz <= 0) return AudioSink.CURRENT_POSITION_NOT_SET
+        track?.let { direct ->
+            val played = (direct.playedFrames() - baseConsumedFrames).coerceAtLeast(0L)
+            return startMediaTimeUs + played * C.MICROS_PER_SECOND / deviceRateHz
+        }
+        val target = stream ?: return AudioSink.CURRENT_POSITION_NOT_SET
         val consumed = target.counters()[0]
         val played = (consumed - baseConsumedFrames - deviceBufferFrames).coerceAtLeast(0L)
         return startMediaTimeUs + played * C.MICROS_PER_SECOND / deviceRateHz
     }
 
-    /** Ring still holds audio, or the device buffer is still draining its last frames. */
+    /** Audio still queued (ring / AudioTrack), or the device buffer still draining. */
     fun hasPendingData(): Boolean {
+        track?.let { return it.hasPendingData() }
         val target = stream ?: return false
         val buffered = target.counters()[1]
         if (buffered > 0L) {
@@ -409,10 +547,16 @@ class InternalDirectOutput @Inject constructor(
         return SystemClock.elapsedRealtime() - lastBufferedSeenMs < drainMs
     }
 
-    /** Sink reset between items: keep the endpoint for a same-format next item. */
+    /** Sink reset between items: keep the output for a same-format next item. */
     fun prepareForNextItem() {
-        stream?.pause()
-        stream?.flush()
+        track?.let {
+            it.pause()
+            it.flush()
+        }
+        stream?.let {
+            it.pause()
+            it.flush()
+        }
         playing = false
         rebaseClock()
     }
@@ -425,10 +569,12 @@ class InternalDirectOutput @Inject constructor(
     private fun rebaseClock() {
         startNeedsInit = true
         startMediaTimeUs = 0L
-        baseConsumedFrames = stream?.counters()?.getOrNull(0) ?: 0L
+        baseConsumedFrames = track?.playedFrames() ?: stream?.counters()?.getOrNull(0) ?: 0L
     }
 
     private fun closeLocked() {
+        track?.release()
+        track = null
         stream?.let {
             it.closeStream()
             it.close()
@@ -453,11 +599,12 @@ class InternalDirectOutput @Inject constructor(
     }
 
     private fun onRouteChanged() {
-        // A new route is a new endpoint: forget what the old one accepted.
+        // A new route is a new output: forget what the old one accepted.
         // Off the main thread: configure() may hold the lock while opening.
         scope.launch {
             synchronized(openLock) {
                 openCache.clear()
+                mixedRoutes.clear()
                 cachedProbe = null
             }
             refreshAvailability()
@@ -490,6 +637,9 @@ class InternalDirectOutput @Inject constructor(
         private const val DRAIN_MARGIN_MS = 15L
 
         private val NATIVE_OK: Boolean get() = InternalDirectStream.nativeLoaded
+
+        /** 24-bit packed / 32-bit AudioTrack encodings need Android 12. */
+        private val DIRECT_TRACK_OK: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 
         // Lazy: the pure helpers below must stay usable in JVM unit tests.
         private val MEDIA_ATTRIBUTES: AudioAttributes by lazy {

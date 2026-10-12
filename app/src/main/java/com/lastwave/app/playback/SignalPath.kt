@@ -322,12 +322,28 @@ fun evaluateSignalPath(i: SignalPathInput): SignalPathReport {
     val plat = i.platformMixerRateHz.takeIf { it > 0 }
     val internal = i.internalDirect
     if (internal != null) {
-        checks += PathCheck(
-            R.string.signal_label_mixer,
-            if (internal.mmap) R.string.signal_detail_internal_mixer_bypassed
-            else R.string.signal_detail_internal_mixer_bypassed_nommap,
-            passed = true,
-        )
+        checks += when {
+            internal.backend == InternalBackend.DIRECT_TRACK && internal.directVerified -> PathCheck(
+                R.string.signal_label_mixer,
+                R.string.signal_detail_internal_mixer_direct_track,
+                passed = true,
+            )
+            internal.backend == InternalBackend.DIRECT_TRACK -> PathCheck(
+                R.string.signal_label_mixer,
+                R.string.signal_detail_internal_mixer_direct_unverified,
+                passed = false,
+            )
+            internal.mmap -> PathCheck(
+                R.string.signal_label_mixer,
+                R.string.signal_detail_internal_mixer_bypassed,
+                passed = true,
+            )
+            else -> PathCheck(
+                R.string.signal_label_mixer,
+                R.string.signal_detail_internal_mixer_bypassed_nommap,
+                passed = true,
+            )
+        }
     } else if (i.usbExclusiveActive) {
         checks += PathCheck(
             R.string.signal_label_mixer,
@@ -388,6 +404,14 @@ fun evaluateSignalPath(i: SignalPathInput): SignalPathReport {
                 R.string.signal_label_output,
                 R.string.signal_detail_internal_route_lossy,
                 listOf(routeLabel, internal.deviceRateHz, deviceFormat),
+                passed = false,
+            )
+        }
+        if (internal.route == InternalRoute.BLUETOOTH) {
+            // The bypass ends at the DSP: the Bluetooth codec re-encodes after it.
+            checks += PathCheck(
+                R.string.signal_label_bt_codec,
+                R.string.signal_detail_bt_codec,
                 passed = false,
             )
         }
@@ -525,6 +549,7 @@ fun internalFailureDetail(reason: InternalDirectReason): Int = when (reason) {
     InternalDirectReason.CHECKING -> R.string.internal_reason_checking
     InternalDirectReason.AVAILABLE -> R.string.internal_reason_available
     InternalDirectReason.ACTIVE -> R.string.internal_reason_active
+    InternalDirectReason.MIXED_BY_ANDROID -> R.string.internal_reason_mixed
 }
 
 /**

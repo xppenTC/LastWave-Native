@@ -1750,6 +1750,7 @@ class MusicPlayer @Inject constructor(
             internalDirectOutput.availability.collect { availability ->
                 if (availability.route == lastRoute) return@collect
                 lastRoute = availability.route
+                audioSinks.forEach { sink -> runCatching { sink.retryInternalDirect() } }
                 onMain {
                     applyDacRoutingFor(currentSourceRateHz())
                     updateSignalPath()
@@ -2903,8 +2904,9 @@ class MusicPlayer @Inject constructor(
         if (!bitPerfectEnabled || !internalDirectPrefEnabled) return false
         if (isSpatialAudioCodec(_state.value.audioCodec)) return false
         if (exclusiveUsbWanted()) return false
-        val route = internalDirectOutput.currentRoute().first
-        return route != InternalRoute.BLUETOOTH && route != InternalRoute.USB
+        // Bluetooth included: the vendor direct profile reaches A2DP (encoded in
+        // the DSP). USB DACs belong to the usbdevfs exclusive output.
+        return internalDirectOutput.currentRoute().first != InternalRoute.USB
     }
 
     /** True only for genuine Atmos decode: an E-AC-3 JOC decoder. A plain
@@ -3214,7 +3216,7 @@ class MusicPlayer @Inject constructor(
         } else {
             val availability = internalDirectOutput.availability.value
             when (availability.reason) {
-                InternalDirectReason.BLUETOOTH, InternalDirectReason.USB -> availability.reason
+                InternalDirectReason.USB -> availability.reason
                 else -> internalDirectOutput.lastFailure
                     ?: availability.reason.takeUnless {
                         it == InternalDirectReason.AVAILABLE || it == InternalDirectReason.ACTIVE

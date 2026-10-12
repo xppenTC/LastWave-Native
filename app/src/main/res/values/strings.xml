@@ -336,7 +336,7 @@
     <string name="signal_detail_internal_route">%1$s — %2$d Hz • %3$s, samples enter the HAL unchanged</string>
     <string name="signal_detail_internal_route_widened">%1$s — %2$d Hz • %3$s carried losslessly as %4$s</string>
     <string name="signal_detail_internal_route_lossy">%1$s — %2$d Hz • the output only takes %3$s: precision reduced</string>
-    <string name="internal_reason_bluetooth">Bluetooth: the codec re-encodes the audio, no bypass is possible</string>
+    <string name="internal_reason_bluetooth">Bluetooth: tried, but no direct output was granted</string>
     <string name="internal_reason_usb">USB DAC connected: handled by USB exclusive output</string>
     <string name="internal_reason_exclusive_refused">This phone refuses exclusive (MMAP) access on this output — shared mixer kept</string>
     <string name="internal_reason_no_aaudio">No exclusive AAudio output on this route</string>
@@ -366,11 +366,17 @@
     <string name="badge_mode_direct">Direct</string>
     <string name="badge_mode_mixer">Mixer</string>
     <string name="settings_internal_direct">Internal direct output</string>
-    <string name="settings_internal_direct_on">Bypasses the Android mixer on the speaker / jack (exclusive AAudio) • turns Bit-Perfect on</string>
+    <string name="settings_internal_direct_on">Bypasses the Android mixer (speaker, jack, Bluetooth) • turns Bit-Perfect on</string>
     <string name="settings_internal_direct_off">Off • Like UAPP HiRes Direct, without a USB DAC</string>
     <string name="settings_internal_direct_inactive">On, inactive here — %1$s</string>
     <string name="settings_internal_direct_enabled_toast">Internal direct output on — Bit-Perfect enabled too</string>
     <string name="settings_force_sw_volume">Software volume (USB DAC)</string>
     <string name="settings_force_sw_volume_on">PCM scaled by the app • DAC hardware level parked at 0 dB</string>
     <string name="settings_force_sw_volume_off">DAC hardware volume when available, software otherwise</string>
+    <string name="signal_detail_internal_mixer_direct_track">Bypassed — Android granted a DIRECT output (no mixing, no resampling)</string>
+    <string name="signal_detail_internal_mixer_direct_unverified">Direct output requested — Android did not confirm it</string>
+    <string name="signal_label_bt_codec">Bluetooth codec</string>
+    <string name="signal_detail_bt_codec">Re-encoded by the Bluetooth codec (LDAC, aptX…) after the bypass — not bit-perfect to the headphones</string>
+    <string name="internal_reason_mixed">Android mixed the stream on this output — no direct path here</string>
+    <string name="signal_internal_backend_direct">DIRECT output</string>
 </resources>

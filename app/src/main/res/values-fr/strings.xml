@@ -266,7 +266,7 @@
     <string name="signal_detail_internal_route">%1$s — %2$d Hz • %3$s, échantillons intacts jusqu\'au HAL</string>
     <string name="signal_detail_internal_route_widened">%1$s — %2$d Hz • %3$s transporté sans perte en %4$s</string>
     <string name="signal_detail_internal_route_lossy">%1$s — %2$d Hz • la sortie n\'accepte que %3$s : précision réduite</string>
-    <string name="internal_reason_bluetooth">Bluetooth : le codec réencode le son, aucun contournement possible</string>
+    <string name="internal_reason_bluetooth">Bluetooth : essayé, mais aucune sortie directe accordée</string>
     <string name="internal_reason_usb">DAC USB branché : géré par la sortie USB exclusive</string>
     <string name="internal_reason_exclusive_refused">Ce téléphone refuse l\'accès exclusif (MMAP) sur cette sortie — mixer partagé conservé</string>
     <string name="internal_reason_no_aaudio">Aucune sortie AAudio exclusive sur cette route</string>
@@ -296,11 +296,17 @@
     <string name="badge_mode_direct">Direct</string>
     <string name="badge_mode_mixer">Mixer</string>
     <string name="settings_internal_direct">Sortie directe interne</string>
-    <string name="settings_internal_direct_on">Contourne le mixer Android sur haut-parleur / jack (AAudio exclusif) • active Bit-Perfect</string>
+    <string name="settings_internal_direct_on">Contourne le mixer Android (haut-parleur, jack, Bluetooth) • active Bit-Perfect</string>
     <string name="settings_internal_direct_off">Désactivée • Comme HiRes Direct d\'UAPP, sans DAC USB</string>
     <string name="settings_internal_direct_inactive">Activée, inactive ici — %1$s</string>
     <string name="settings_internal_direct_enabled_toast">Sortie directe interne activée — Bit-Perfect activé aussi</string>
     <string name="settings_force_sw_volume">Volume logiciel (DAC USB)</string>
     <string name="settings_force_sw_volume_on">PCM atténué par l\'app • volume matériel du DAC laissé à 0 dB</string>
     <string name="settings_force_sw_volume_off">Volume matériel du DAC si disponible, sinon logiciel</string>
+    <string name="signal_detail_internal_mixer_direct_track">Contourné — Android a accordé une sortie DIRECT (ni mixage, ni rééchantillonnage)</string>
+    <string name="signal_detail_internal_mixer_direct_unverified">Sortie directe demandée — non confirmée par Android</string>
+    <string name="signal_label_bt_codec">Codec Bluetooth</string>
+    <string name="signal_detail_bt_codec">Réencodé par le codec Bluetooth (LDAC, aptX…) après le contournement — pas bit-perfect jusqu\'au casque</string>
+    <string name="internal_reason_mixed">Android a mixé le flux sur cette sortie — pas de chemin direct ici</string>
+    <string name="signal_internal_backend_direct">sortie DIRECT</string>
 </resources>

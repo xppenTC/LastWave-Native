@@ -9,37 +9,39 @@ Package id `com.lastwave.app.bypass`, app name **LastWave Bypass**: installs nex
 
 `Settings › Audio › Output & Loudness › Internal direct output`
 
-When on (it also turns Bit-Perfect on, like USB Exclusive does), the decoded PCM is written to an
-**AAudio EXCLUSIVE stream** on the phone's own output (speaker, wired jack). Exclusive AAudio
-streams are memory-mapped (MMAP): the app writes straight into the HAL buffer, so AudioFlinger's
-mixer, resampler and software effects never see the samples. This is the only public, root-free
-way to bypass the Android mixer on internal outputs.
+When on (it also turns Bit-Perfect on, like USB Exclusive does), the decoded PCM bypasses the
+Android mixer on the phone's own outputs — speaker, jack **and Bluetooth** — through one of two
+backends, tried in order for every track:
 
-Negotiation, per track (`InternalDirectOutput.configure`):
+1. **Direct track (UAPP "HiRes Direct" recipe)** — a plain music `AudioTrack` in **24-bit packed**
+   at the **source rate** (16-bit widened losslessly, 24-bit-in-32 narrowed losslessly). On
+   Qualcomm-based phones the vendor audio policy places such a track on its `direct_pcm_out`
+   profile (`AUDIO_OUTPUT_FLAG_DIRECT`, 44.1–384 kHz, speaker/jack/A2DP/BLE/USB). Apps cannot ask
+   for that flag; the policy grants it. It is **verified per track**: Android refuses playback-rate
+   changes on direct tracks and accepts them on mixed ones. A mixed track is dropped (no gain).
+   Found by reading `dumpsys media.audio_flinger` while UAPP played on a HONOR Win: UAPP's 16-bit
+   FLAC went out as 24-bit packed on a DIRECT thread to `BLUETOOTH_A2DP`.
+2. **AAudio EXCLUSIVE (MMAP)** — fallback. Writes into the HAL buffer; usually fixed at 48 kHz, so
+   44.1 kHz sources are resampled in-app (libsoxr). Opened with every Oboe conversion disabled and
+   verified after open.
 
-1. source rate + source format → samples enter the HAL unchanged;
-2. source rate + the endpoint's native format → format changed in `DirectOutputStream::write`
-   (reported as lossless only when every source bit fits, e.g. 24-bit → 32-bit);
-3. the endpoint's native rate + format → resampled in-app with the existing libsoxr converter.
-
-The stream is always opened with every Oboe conversion disabled and verified after open
-(sharing mode, rate, format, channels), so what the signal-path page shows is the real wire format.
-Any refusal falls back to the regular mixer path.
+Any refusal falls back to the regular mixer path. A route change (jack, Bluetooth on/off) makes the
+output re-negotiate and re-verify mid-track.
 
 ## What it cannot do
 
-- **Bluetooth**: the codec (SBC/AAC/aptX/LDAC) re-encodes everything after the mixer; there is no
-  MMAP path. The option is greyed out / reported as inactive on Bluetooth.
+- **Bluetooth**: the mixer is bypassed, but the codec (SBC/AAC/aptX/LDAC) still re-encodes in the
+  DSP afterwards. The signal-path page shows a failing "Bluetooth codec" row for that reason.
 - **USB DACs**: handled by the upstream usbdevfs *USB Exclusive Output* (unchanged).
 - **Vendor DSP after the HAL** (speaker protection, OEM effects running in the audio DSP) is out of
   Android's reach. The internal path is therefore reported as **DIRECT → HAL**, never as gold
   BIT-PERFECT (which stays reserved for verified USB exclusive output).
-- Whether a given phone grants exclusive MMAP access on a given output is up to the vendor HAL.
+- Whether a phone exposes a direct profile at all is up to its vendor audio policy.
 
 ## UI
 
-- Quality badge in the player: `… · Bit-perfect` / `… · Direct` / `… · Mixer` (Mixer only when
-  Bit-Perfect is on but not achieved). Tap or long-press opens the signal-path page.
+- Quality badge in the player: `… · Bit-perfect` / `… · Direct` (`Direct?` when Android did not
+  confirm it) / `… · Mixer` (Mixer only when Bit-Perfect is on but not achieved). Tap or long-press opens the signal-path page.
 - Signal-path page: new rows for the internal route, plus an **Internal output** section showing the
   route, the direct-output state (or the refusal reason) and what the exclusive endpoint accepts.
 - `Software volume (USB DAC)`: forces PCM-scaled volume instead of the DAC's Feature Unit volume
@@ -50,7 +52,7 @@ Any refusal falls back to the regular mixer path.
 | Area | Files |
 |---|---|
 | Native exclusive stream | `app/src/main/cpp/DirectOutputStream.{h,cpp}`, `DirectOutputBridge.cpp` |
-| Kotlin output | `playback/InternalDirectStream.kt`, `playback/InternalDirectOutput.kt`, `playback/usb/InternalDirectPrefs.kt` |
+| Kotlin output | `playback/DirectTrackStream.kt`, `playback/InternalDirectStream.kt`, `playback/InternalDirectOutput.kt`, `playback/usb/InternalDirectPrefs.kt` |
 | Integration | `NativeProcessingAudioSink.kt`, `MusicPlayer.kt`, `ExclusiveUsbOutput.kt`, `SignalPath.kt` |
 | UI | `SignalPathDialog.kt`, `PlayerHost.kt`, `SettingsScreen.kt`, `SettingsViewModel.kt`, `SettingsSearchIndex.kt` |
 | Tests | `app/src/test/.../InternalDirectSignalPathTest.kt` |
@@ -64,5 +66,5 @@ server accepts it is up to that server.
 
 ## Logs
 
-`adb logcat -s InternalDirect DirectOutputStream NativeAudioSink` shows the probe result, every
+`adb logcat -s InternalDirect DirectTrack DirectOutputStream NativeAudioSink` shows the probe result, every
 negotiation attempt and why the stream was (not) engaged.

@@ -214,7 +214,12 @@ fun SignalPathDialog(
                             R.string.signal_internal_endpoint_value,
                             session.deviceRateHz,
                             InternalDirectStream.labelOf(session.deviceEncoding),
-                        ) + if (session.mmap) " • MMAP" else ""
+                        ) + when {
+                            session.backend == com.lastwave.app.playback.InternalBackend.DIRECT_TRACK ->
+                                " • " + stringResource(R.string.signal_internal_backend_direct)
+                            session.mmap -> " • MMAP"
+                            else -> ""
+                        }
                         probe != null && probe.usable -> stringResource(
                             R.string.signal_internal_endpoint_value,
                             probe.sampleRateHz,
