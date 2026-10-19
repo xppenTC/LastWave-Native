@@ -1,6 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">LastWave</string>
+    <string name="app_name">LastWave Bypass</string>
     <string name="widget_name">LastWave Плеер</string>
     <string name="widget_description">Обложка, информация о треке и управление воспроизведением для всех медиаприложений</string>
 

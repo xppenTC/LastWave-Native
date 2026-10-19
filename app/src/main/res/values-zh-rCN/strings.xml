@@ -1,6 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">LastWave</string>
+    <string name="app_name">LastWave Bypass</string>
     <string name="widget_name">LastWave 播放器</string>
     <string name="widget_description">所有媒体应用的封面、曲目信息和播放控制</string>
 
