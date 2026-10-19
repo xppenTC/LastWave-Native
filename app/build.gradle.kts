@@ -57,11 +57,12 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.lastwave.app"
+        // Fork: own package so it installs next to the official LastWave.
+        applicationId = "com.lastwave.app.bypass"
         minSdk = (project.findProperty("minSdk") as? String)?.toIntOrNull() ?: 29
         targetSdk = 35
         versionCode = 26
-        versionName = "4.3.1"
+        versionName = "4.3.1-bypass"
 
         (project.findProperty("targetAbis") as? String)?.let { prop ->
             ndk {
