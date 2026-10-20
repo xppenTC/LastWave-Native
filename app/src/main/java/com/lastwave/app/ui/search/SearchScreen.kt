@@ -86,6 +86,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lastwave.app.data.search.SearchResultItem
 import com.lastwave.app.data.search.SearchTab
+import com.lastwave.app.data.search.isGames
 import com.lastwave.app.ui.common.ArtworkImage
 import com.lastwave.app.ui.common.ExpressiveMotion
 import com.lastwave.app.ui.common.HeaderActionIcon
@@ -111,6 +112,9 @@ import androidx.compose.ui.graphics.SolidColor
 
 
 private val SearchHeaderShape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
+
+/** Separator for the saved KHInsider overlay keys (never in titles or paths). */
+private const val KH_SEP = "\u0001"
 
 private val EXPLORE_GENRES = listOf(
     "Pop", "Rock", "Hip-Hop", "Lo-Fi", "Electronic", "Indie",
@@ -138,8 +142,13 @@ fun SearchScreen(
     // Long-press (deep press) on a TRACKS row opens the mini tray;
     // the overflow button keeps the full sheet.
     var miniTrayItem by remember { mutableStateOf<SearchResultItem?>(null) }
-    // Video-game (KHInsider) album opened from the GAMES filter.
-    var gameAlbum by remember { mutableStateOf<SearchResultItem?>(null) }
+    // Video-game (KHInsider) overlays: an album list and an album on top of it.
+    // Saved as strings so they survive a trip to Downloads and back.
+    var gameListKey by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    var gameAlbumKey by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    fun openGameAlbum(id: String, title: String, artwork: String?, highlight: String?) {
+        gameAlbumKey = listOf(id, title, artwork.orEmpty(), highlight.orEmpty()).joinToString(KH_SEP)
+    }
     val focusManager = LocalFocusManager.current
 
     Box(
@@ -237,6 +246,7 @@ fun SearchScreen(
                                             text = when (state.tab) {
                                                 SearchTab.USERS -> stringResource(R.string.search_hint_users)
                                                 SearchTab.GAMES -> stringResource(R.string.khinsider_search_hint)
+                                                SearchTab.GAMES_SONGS -> stringResource(R.string.khinsider_search_hint_songs)
                                                 else -> stringResource(R.string.search_hint_yt)
                                             },
                                             style = MaterialTheme.typography.bodyMedium,
@@ -349,6 +359,15 @@ fun SearchScreen(
                             )
                         }
                     }
+                }
+
+                // 2a. Video-game filter, no query: browse KHInsider.
+                state.query.isBlank() && state.tab.isGames -> {
+                    com.lastwave.app.ui.search.khinsider.KhInsiderBrowseSection(
+                        onOpenList = { list ->
+                            gameListKey = listOf(list.title, list.path, list.paged.toString()).joinToString(KH_SEP)
+                        },
+                    )
                 }
 
                 // 2. Empty Query State: Show Recent Search History & Explore Tags
@@ -466,7 +485,7 @@ fun SearchScreen(
                                     )
                                     Spacer(Modifier.height(10.dp))
                                     Text(stringResource(R.string.search_no_results, state.query), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    if (state.tab == SearchTab.GAMES) {
+                                    if (state.tab.isGames) {
                                         Spacer(Modifier.height(6.dp))
                                         Text(
                                             state.errorMessage?.let { stringResource(R.string.khinsider_error, it) }
@@ -503,7 +522,10 @@ fun SearchScreen(
                                                         SearchTab.ARTISTS -> onOpenArtist(topResult.name, topResult.entityId)
                                                         SearchTab.ALBUMS -> onOpenAlbum(topResult.name, topResult.artist.orEmpty(), topResult.entityId)
                                                         SearchTab.PLAYLISTS -> topResult.entityId?.let(onOpenPlaylist)
-                                                        SearchTab.GAMES -> gameAlbum = topResult
+                                                        SearchTab.GAMES, SearchTab.GAMES_SONGS -> openGameAlbum(
+                                                            topResult.entityId.orEmpty(), topResult.name, topResult.artworkUrl,
+                                                            state.query.takeIf { state.tab == SearchTab.GAMES_SONGS },
+                                                        )
                                                         else -> viewModel.playResult(topResult)
                                                     }
                                                 },
@@ -515,7 +537,7 @@ fun SearchScreen(
                                                         SearchTab.TRACKS -> TrackMenuTarget.Track(topResult.name, topResult.artist.orEmpty(), topResult.url)
                                                         SearchTab.ARTISTS -> TrackMenuTarget.Artist(topResult.name, topResult.url)
                                                         SearchTab.ALBUMS -> TrackMenuTarget.Album(topResult.name, topResult.artist.orEmpty(), topResult.url)
-                                                        SearchTab.PLAYLISTS, SearchTab.USERS, SearchTab.GAMES -> null
+                                                        SearchTab.PLAYLISTS, SearchTab.USERS, SearchTab.GAMES, SearchTab.GAMES_SONGS -> null
                                                     }
                                                 },
                                             )
@@ -541,7 +563,10 @@ fun SearchScreen(
                                                     SearchTab.ARTISTS -> onOpenArtist(item.name, item.entityId)
                                                     SearchTab.ALBUMS -> onOpenAlbum(item.name, item.artist.orEmpty(), item.entityId)
                                                     SearchTab.PLAYLISTS -> item.entityId?.let(onOpenPlaylist)
-                                                    SearchTab.GAMES -> gameAlbum = item
+                                                    SearchTab.GAMES, SearchTab.GAMES_SONGS -> openGameAlbum(
+                                                        item.entityId.orEmpty(), item.name, item.artworkUrl,
+                                                        state.query.takeIf { state.tab == SearchTab.GAMES_SONGS },
+                                                    )
                                                     else -> viewModel.playResult(item)
                                                 }
                                             },
@@ -555,7 +580,7 @@ fun SearchScreen(
                                                     SearchTab.TRACKS -> TrackMenuTarget.Track(item.name, item.artist.orEmpty(), item.url)
                                                     SearchTab.ARTISTS -> TrackMenuTarget.Artist(item.name, item.url)
                                                     SearchTab.ALBUMS -> TrackMenuTarget.Album(item.name, item.artist.orEmpty(), item.url)
-                                                    SearchTab.PLAYLISTS, SearchTab.USERS, SearchTab.GAMES -> null
+                                                    SearchTab.PLAYLISTS, SearchTab.USERS, SearchTab.GAMES, SearchTab.GAMES_SONGS -> null
                                                 }
                                             },
                                         )
@@ -568,6 +593,22 @@ fun SearchScreen(
             }
         }
     }
+    gameListKey?.split(KH_SEP)?.takeIf { it.size == 3 }?.let { (title, path, paged) ->
+        com.lastwave.app.ui.search.khinsider.KhInsiderListOverlay(
+            list = com.lastwave.app.data.khinsider.KhBrowseList(id = path, title = title, path = path, paged = paged.toBoolean()),
+            onOpenAlbum = { album -> openGameAlbum(album.id, album.name, album.thumbnailUrl, null) },
+            onDismiss = { gameListKey = null },
+        )
+    }
+    gameAlbumKey?.split(KH_SEP)?.takeIf { it.size == 4 }?.let { (id, title, artwork, highlight) ->
+        com.lastwave.app.ui.search.khinsider.KhInsiderAlbumOverlay(
+            albumId = id,
+            fallbackTitle = title,
+            fallbackArtwork = artwork.ifBlank { null },
+            highlight = highlight.ifBlank { null },
+            onDismiss = { gameAlbumKey = null },
+        )
+    }
     }
 
     menuTarget?.let { target ->
@@ -576,15 +617,6 @@ fun SearchScreen(
             capabilities = TrackMenuCapabilities(showCopyActions = true, showDeleteScrobble = true),
             playbackSourceLabel = "Search",
             onDismiss = { menuTarget = null },
-        )
-    }
-
-    gameAlbum?.let { album ->
-        com.lastwave.app.ui.search.khinsider.KhInsiderAlbumDialog(
-            albumId = album.entityId.orEmpty(),
-            fallbackTitle = album.name,
-            fallbackArtwork = album.artworkUrl,
-            onDismiss = { gameAlbum = null },
         )
     }
 
@@ -656,7 +688,7 @@ private fun TopResultCard(
                 SearchTab.ALBUMS -> Icons.Filled.Album
                 SearchTab.PLAYLISTS -> Icons.AutoMirrored.Filled.QueueMusic
                 SearchTab.USERS -> Icons.Filled.Person
-                SearchTab.GAMES -> Icons.Filled.SportsEsports
+                SearchTab.GAMES, SearchTab.GAMES_SONGS -> Icons.Filled.SportsEsports
             }
             Box(
                 modifier = Modifier
@@ -690,7 +722,7 @@ private fun TopResultCard(
                             SearchTab.ALBUMS -> "TOP ALBUM"
                             SearchTab.PLAYLISTS -> "TOP PLAYLIST"
                             SearchTab.USERS -> "USER"
-                            SearchTab.GAMES -> "TOP OST"
+                            SearchTab.GAMES, SearchTab.GAMES_SONGS -> "TOP OST"
                         },
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.ExtraBold,
@@ -711,7 +743,7 @@ private fun TopResultCard(
                     SearchTab.PLAYLISTS -> item.subtitle.orEmpty()
                     SearchTab.ARTISTS -> item.subtitle.orEmpty().ifBlank { "Artist" }
                     SearchTab.USERS -> item.artist.orEmpty()
-                    SearchTab.GAMES -> item.subtitle.orEmpty()
+                    SearchTab.GAMES, SearchTab.GAMES_SONGS -> item.subtitle.orEmpty()
                 }
                 if (subtitle.isNotBlank()) {
                         Text(
@@ -734,8 +766,8 @@ private fun TopResultCard(
                 modifier = Modifier.size(46.dp),
             ) {
                 Icon(
-                    if (tab == SearchTab.PLAYLISTS || tab == SearchTab.GAMES) Icons.AutoMirrored.Filled.ArrowForward else Icons.Filled.PlayArrow,
-                    contentDescription = if (tab == SearchTab.PLAYLISTS || tab == SearchTab.GAMES) "Open" else "Play top result",
+                    if (tab == SearchTab.PLAYLISTS || tab.isGames) Icons.AutoMirrored.Filled.ArrowForward else Icons.Filled.PlayArrow,
+                    contentDescription = if (tab == SearchTab.PLAYLISTS || tab.isGames) "Open" else "Play top result",
                     tint = MaterialTheme.colorScheme.onPrimary,
                     modifier = Modifier.size(26.dp),
                 )
@@ -899,7 +931,7 @@ private fun SearchResultRow(
                 onClick = onClick,
                 onLongClick = when (tab) {
                     SearchTab.TRACKS -> onLongClick
-                    SearchTab.GAMES -> null
+                    SearchTab.GAMES, SearchTab.GAMES_SONGS -> null
                     else -> onMenu
                 },
             )
@@ -912,7 +944,7 @@ private fun SearchResultRow(
             SearchTab.ALBUMS -> Icons.Filled.Album
             SearchTab.PLAYLISTS -> Icons.AutoMirrored.Filled.QueueMusic
             SearchTab.USERS -> Icons.Filled.Person
-            SearchTab.GAMES -> Icons.Filled.SportsEsports
+            SearchTab.GAMES, SearchTab.GAMES_SONGS -> Icons.Filled.SportsEsports
         }
         Box(modifier = Modifier.size(44.dp)) {
             ArtworkImage(
@@ -943,7 +975,7 @@ private fun SearchResultRow(
                 SearchTab.PLAYLISTS -> item.subtitle.orEmpty()
                 SearchTab.ARTISTS -> item.subtitle.orEmpty()
                 SearchTab.USERS -> listOfNotNull(item.artist, item.listeners?.let { "$it scrobbles" }).joinToString(" \u00b7 ")
-                SearchTab.GAMES -> item.subtitle.orEmpty()
+                SearchTab.GAMES, SearchTab.GAMES_SONGS -> item.subtitle.orEmpty()
             }
             if (subtitle.isNotBlank()) {
                 Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -956,7 +988,7 @@ private fun SearchResultRow(
             IconButton(onClick = { openLastFm("/+removefriend") }) {
                 Icon(Icons.Filled.PersonRemove, contentDescription = stringResource(R.string.search_unfollow_cd, item.name))
             }
-        } else if (tab != SearchTab.PLAYLISTS && tab != SearchTab.GAMES) {
+        } else if (tab != SearchTab.PLAYLISTS && !tab.isGames) {
             com.lastwave.app.ui.common.OverflowMenuButton(onClick = onMenu)
         }
     }
@@ -1021,9 +1053,22 @@ private fun SearchFilterPills(
     }
     Spacer(Modifier.height(8.dp))
     GamesFilterButton(
-        selected = selectedTab == SearchTab.GAMES,
-        onClick = { onTabSelected(SearchTab.GAMES) },
+        selected = selectedTab.isGames,
+        onClick = { if (!selectedTab.isGames) onTabSelected(SearchTab.GAMES) },
     )
+    if (selectedTab.isGames) {
+        Spacer(Modifier.height(8.dp))
+        androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            listOf(SearchTab.GAMES to R.string.khinsider_mode_albums, SearchTab.GAMES_SONGS to R.string.khinsider_mode_songs)
+                .forEachIndexed { i, (tab, label) ->
+                    androidx.compose.material3.SegmentedButton(
+                        selected = selectedTab == tab,
+                        onClick = { onTabSelected(tab) },
+                        shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(index = i, count = 2),
+                    ) { Text(stringResource(label), style = MaterialTheme.typography.labelLarge) }
+                }
+        }
+    }
     }
 }
 

@@ -58,6 +58,46 @@ class KhInsiderClient @Inject constructor(
             ?.takeIf { it.isNotBlank() } ?: FALLBACK_UA
     }
 
+    // --- Offline copies ---------------------------------------------------
+    // Track page -> where its downloaded file lives (MediaStore uri or path).
+    private val downloadsPrefs by lazy { context.getSharedPreferences(DOWNLOADS_PREFS, Context.MODE_PRIVATE) }
+    private val _downloadedPages = MutableStateFlow<Set<String>>(emptySet())
+    /** Track pages that have a saved file (refreshed by [refreshDownloads]). */
+    val downloadedPages: StateFlow<Set<String>> = _downloadedPages.asStateFlow()
+
+    fun recordDownload(pagePath: String, location: String) {
+        downloadsPrefs.edit().putString(pagePath, location).apply()
+        _downloadedPages.value = _downloadedPages.value + pagePath
+    }
+
+    /** Re-reads the saved copies, dropping those deleted outside the app. */
+    suspend fun refreshDownloads() = withContext(Dispatchers.IO) {
+        val present = downloadsPrefs.all.keys.filterTo(mutableSetOf()) { downloadedLocation(it) != null }
+        _downloadedPages.value = present
+    }
+
+    /** The saved file for [pagePath] if it is still readable, else null (and forgotten). */
+    fun downloadedLocation(pagePath: String): String? {
+        val location = downloadsPrefs.getString(pagePath, null) ?: return null
+        val readable = runCatching {
+            if (location.startsWith("content://")) {
+                context.contentResolver.openFileDescriptor(android.net.Uri.parse(location), "r")?.use { true } ?: false
+            } else {
+                java.io.File(location.removePrefix("file://")).let { it.isFile && it.canRead() }
+            }
+        }.getOrDefault(false)
+        if (!readable) {
+            downloadsPrefs.edit().remove(pagePath).apply()
+            _downloadedPages.value = _downloadedPages.value - pagePath
+            return null
+        }
+        return location
+    }
+
+    /** What to play for a track page: its saved file first, else the site's file link. Blocking. */
+    fun playbackSourceBlocking(pagePath: String): String =
+        downloadedLocation(pagePath) ?: resolveFileUrlBlocking(pagePath)
+
     fun setFormat(format: KhFormat) {
         prefs.edit().putString(KEY_FORMAT, format.name).apply()
         _format.value = format
@@ -67,11 +107,12 @@ class KhInsiderClient @Inject constructor(
         runCatching { KhFormat.valueOf(prefs.getString(KEY_FORMAT, null) ?: KhFormat.FLAC.name) }
             .getOrDefault(KhFormat.FLAC)
 
-    suspend fun search(query: String): List<KhAlbumSummary> = withContext(Dispatchers.IO) {
+    /** Albums by name, or (with [songNames]) albums containing a song with that name. */
+    suspend fun search(query: String, songNames: Boolean = false): List<KhAlbumSummary> = withContext(Dispatchers.IO) {
         val trimmed = query.trim()
         // KHInsider refuses searches shorter than three characters.
         if (trimmed.length < 3) return@withContext emptyList()
-        val page = fetch(KhInsiderParser.searchUrl(trimmed))
+        val page = fetch(KhInsiderParser.searchUrl(trimmed, songNames))
         // An exact match redirects straight to the album page.
         if (KhInsiderParser.isAlbumPage(page.finalUrl)) {
             val id = KhInsiderParser.albumIdOf(page.finalUrl) ?: return@withContext emptyList()
@@ -89,6 +130,22 @@ class KhInsiderClient @Inject constructor(
             )
         }
         KhInsiderParser.parseSearch(page.html)
+    }
+
+    suspend fun albumList(list: KhBrowseList, page: Int = 1): KhAlbumPage = withContext(Dispatchers.IO) {
+        val html = fetch(KhInsiderParser.listUrl(list.path, page)).html
+        KhInsiderParser.parseAlbumPage(html, page).let { if (list.paged) it else it.copy(hasNext = false) }
+    }
+
+    @Volatile private var platformCache: List<Pair<String, String>>? = null
+
+    /** Every platform KHInsider lists; the menu's main platforms if the page can't be read. */
+    suspend fun platforms(): List<Pair<String, String>> = withContext(Dispatchers.IO) {
+        platformCache?.let { return@withContext it }
+        val parsed = runCatching {
+            KhInsiderParser.parsePlatforms(fetch("${KhInsiderParser.BASE_URL}/console-list").html)
+        }.getOrDefault(emptyList())
+        (parsed.ifEmpty { KhInsiderParser.MAIN_PLATFORMS }).also { if (parsed.isNotEmpty()) platformCache = it }
     }
 
     suspend fun album(albumId: String, forceRefresh: Boolean = false): KhAlbum = withContext(Dispatchers.IO) {
@@ -234,6 +291,7 @@ class KhInsiderClient @Inject constructor(
         const val TAG = "KhInsider"
         const val PREFS = "khinsider_prefs"
         const val KEY_FORMAT = "format"
+        const val DOWNLOADS_PREFS = "khinsider_downloads"
         const val WEBVIEW_TIMEOUT_MS = 25_000L
         const val POLL_INTERVAL_MS = 700L
         const val MAX_POLLS = 25

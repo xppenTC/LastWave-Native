@@ -1,6 +1,7 @@
 package com.lastwave.app.data.khinsider
 
 import com.google.common.truth.Truth.assertThat
+import com.lastwave.app.ui.search.khinsider.matchesSongQuery
 import org.junit.Test
 
 /**
@@ -156,5 +157,70 @@ class KhInsiderParserTest {
         assertThat(KhInsiderParser.isCloudflareBlock("<title>Attention Required! | Cloudflare</title>")).isTrue()
         assertThat(KhInsiderParser.isCloudflareChallenge(albumHtml)).isFalse()
         assertThat(KhInsiderParser.searchUrl("zelda ocarina")).isEqualTo("https://downloads.khinsider.com/search?search=zelda+ocarina")
+    }
+
+    @Test
+    fun parsesAListPageAndItsNextPage() {
+        val html = """
+            <html><body><div id="pageContent">
+            <p>Found 6586 albums!</p>
+            <table class="albumList">
+              <tr><th></th><th>Album</th><th>Platform</th><th>Type</th><th>Year</th></tr>
+              <tr><td><a href="/game-soundtracks/album/a-2021"><img src="/t/a.jpg"></a></td><td><a href="/game-soundtracks/album/a-2021">A</a></td><td>Switch</td><td>Soundtrack</td><td>2021</td></tr>
+            </table>
+            <a href="https://downloads.khinsider.com/game-soundtracks/nintendo-switch?page=2">2</a>
+            </div></body></html>
+        """.trimIndent()
+        val page = KhInsiderParser.parseAlbumPage(html, 1)
+        assertThat(page.albums.map { it.id }).containsExactly("a-2021")
+        assertThat(page.hasNext).isTrue()
+        assertThat(KhInsiderParser.parseAlbumPage(html, 2).hasNext).isFalse()
+    }
+
+    @Test
+    fun parsesTop40WithRankColumn() {
+        val html = """
+            <table><tr><th></th><th>#</th><th>Album</th><th></th></tr>
+            <tr><td><a href="https://downloads.khinsider.com/game-soundtracks/album/minecraft"><img src="https://img.example/m.png"></a></td>
+            <td>1.</td><td><a href="https://downloads.khinsider.com/game-soundtracks/album/minecraft">Minecraft (2011)</a></td><td><i>remove</i></td></tr></table>
+        """.trimIndent()
+        val albums = KhInsiderParser.parseSearch(html)
+        assertThat(albums).hasSize(1)
+        assertThat(albums[0].name).isEqualTo("Minecraft (2011)")
+        assertThat(albums[0].thumbnailUrl).isEqualTo("https://img.example/m.png")
+    }
+
+    @Test
+    fun parsesPlatformListSkippingNonPlatformLinks() {
+        val html = """
+            <div id="pageContent">
+              <a href="/game-soundtracks/nintendo-switch">Switch</a>
+              <a href="/game-soundtracks/pc-9801">PC-98</a>
+              <a href="/game-soundtracks/album/minecraft">Minecraft</a>
+              <a href="/game-soundtracks/year/2024">2024</a>
+              <a href="/game-soundtracks/ost">Soundtracks</a>
+              <a href="/forums">Forums</a>
+            </div>
+        """.trimIndent()
+        assertThat(KhInsiderParser.parsePlatforms(html))
+            .containsExactly("nintendo-switch" to "Switch", "pc-9801" to "PC-98").inOrder()
+    }
+
+    @Test
+    fun buildsListAndSongSearchUrls() {
+        assertThat(KhInsiderParser.listUrl("/top40", 1)).isEqualTo("https://downloads.khinsider.com/top40")
+        assertThat(KhInsiderParser.listUrl("/game-soundtracks/year/2024", 3))
+            .isEqualTo("https://downloads.khinsider.com/game-soundtracks/year/2024?page=3")
+        assertThat(KhInsiderParser.searchUrl("great fairy", songNames = true))
+            .isEqualTo("https://downloads.khinsider.com/search?search=great+fairy&type=song")
+    }
+
+    @Test
+    fun songQueryMatchesEveryWordIgnoringCaseAndAccents() {
+        val match = ::matchesSongQuery
+        assertThat(match("Great Fairy's Fountain", "fairy fountain")).isTrue()
+        assertThat(match("Pokémon Center", "pokemon")).isTrue()
+        assertThat(match("Main Theme", "fairy")).isFalse()
+        assertThat(match("Main Theme", null)).isFalse()
     }
 }

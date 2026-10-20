@@ -4593,9 +4593,11 @@ private fun PlayableTrack.toGeneratedTrack() = com.lastwave.app.data.generate.Ge
     // Local songs: an imported file keeps its path so any playlist it
     // is added to plays the copy on disk instead of a YouTube search.
     url = com.lastwave.app.data.generate.LocalAudioFormats.importedPathOrNull(playbackUrl)
+        ?: playbackUrl?.takeIf(com.lastwave.app.data.generate::isKhInsiderUrl)
         ?: videoId?.let { "https://music.youtube.com/watch?v=$it" }.orEmpty(),
 )
 
 /** True for files copied by the Local songs importer (app-private storage). */
 internal fun PlayableTrack.isImportedLocalFile(): Boolean =
-    com.lastwave.app.data.generate.LocalAudioFormats.importedPathOrNull(playbackUrl) != null
+    com.lastwave.app.data.generate.LocalAudioFormats.importedPathOrNull(playbackUrl) != null ||
+        com.lastwave.app.data.generate.isKhInsiderUrl(playbackUrl)

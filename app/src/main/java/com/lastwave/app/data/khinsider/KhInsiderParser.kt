@@ -40,6 +40,16 @@ data class KhAlbum(
     val hasFlac: Boolean get() = formats.any { it.equals("flac", ignoreCase = true) }
 }
 
+/** One page of a KHInsider album list (top lists, a platform, a year). */
+data class KhAlbumPage(
+    val albums: List<KhAlbumSummary>,
+    val page: Int,
+    val hasNext: Boolean,
+)
+
+/** A browsable KHInsider list: [path] is relative to the site, e.g. "/top40". */
+data class KhBrowseList(val id: String, val title: String, val path: String, val paged: Boolean = true)
+
 /** Audio file format a user can prefer. MP3 is always present on KHInsider. */
 enum class KhFormat(val extension: String) { FLAC("flac"), MP3("mp3") }
 
@@ -57,8 +67,70 @@ object KhInsiderParser {
     private val TRACK_NUMBER = Regex("""^(\d+)\.$""")
     private val FILE_LINK = Regex("""^https?://[^/]+/(?:soundtracks|ost)/.+""", RegexOption.IGNORE_CASE)
 
-    fun searchUrl(query: String): String =
-        "$BASE_URL/search?search=${URLEncoder.encode(query.trim(), "UTF-8")}"
+    fun searchUrl(query: String, songNames: Boolean = false): String =
+        "$BASE_URL/search?search=${URLEncoder.encode(query.trim(), "UTF-8")}" +
+            if (songNames) "&type=song" else ""
+
+    /** Popular lists, as linked from the site's menu. */
+    val POPULAR_LISTS = listOf(
+        KhBrowseList("top40", "Top 40", "/top40", paged = false),
+        KhBrowseList("top6m", "Top 100 · 6 mois", "/last-6-months-top-100", paged = false),
+        KhBrowseList("topnew", "Top 100 · nouveautés", "/top-100-newly-added", paged = false),
+        KhBrowseList("favorites", "Les plus favoris", "/most-favorites", paged = false),
+        KhBrowseList("alltime", "Top 1000 de tous les temps", "/all-time-top-1000", paged = false),
+    )
+
+    /** Main platforms from the site's menu (slug -> label); the full list comes from /console-list. */
+    val MAIN_PLATFORMS = listOf(
+        "nintendo-switch" to "Switch", "switch-2" to "Switch 2", "playstation-5" to "PS5",
+        "playstation-4" to "PS4", "xbox-one" to "Xbox One", "windows" to "Windows", "steam" to "Steam",
+        "nintendo-3ds" to "3DS", "nintendo-ds" to "DS", "nintendo-wii-u" to "Wii U", "nintendo-wii" to "Wii",
+        "nintendo-gamecube" to "GameCube", "nintendo-64" to "N64", "nintendo-snes" to "SNES",
+        "nintendo-nes" to "NES", "gameboy-advance" to "GBA", "gameboy" to "Game Boy",
+        "playstation-3" to "PS3", "playstation-2" to "PS2", "playstation" to "PS1",
+        "playstation-portable-psp" to "PSP", "playstation-vita" to "PS Vita",
+        "xbox-360" to "Xbox 360", "xbox" to "Xbox",
+    )
+
+    fun platformList(slug: String, label: String) = KhBrowseList("platform:$slug", label, "/game-soundtracks/$slug")
+
+    fun yearList(year: Int) = KhBrowseList("year:$year", year.toString(), "/game-soundtracks/year/$year")
+
+    fun listUrl(path: String, page: Int): String =
+        BASE_URL + path + if (page > 1) (if ('?' in path) "&" else "?") + "page=$page" else ""
+
+    private val NON_PLATFORM_SLUGS = setOf(
+        "album", "browse", "year", "publisher", "developer", "ost", "gamerips", "singles",
+        "arrangements", "remixes", "compilations", "inspired-by",
+    )
+
+    /** Every platform on /console-list, as (slug, label), in page order. */
+    fun parsePlatforms(html: String): List<Pair<String, String>> {
+        val doc = Jsoup.parse(html, BASE_URL)
+        val content = doc.getElementById("pageContent") ?: doc.body()
+        val out = LinkedHashMap<String, String>()
+        for (a in content.select("a[href]")) {
+            val path = a.absUrl("href").substringAfter("khinsider.com", "").substringBefore('?')
+            if (!path.startsWith("/game-soundtracks/")) continue
+            val slug = path.removePrefix("/game-soundtracks/").trimEnd('/')
+            if (slug.isBlank() || '/' in slug || slug in NON_PLATFORM_SLUGS) continue
+            val label = a.text().trim()
+            if (label.isNotBlank() && slug !in out) out[slug] = label
+        }
+        return out.map { it.key to it.value }
+    }
+
+    /** An album list page plus whether a following page exists. */
+    fun parseAlbumPage(html: String, page: Int): KhAlbumPage {
+        val doc = Jsoup.parse(html, BASE_URL)
+        val albums = parseSearch(doc)
+        val next = "page=${page + 1}"
+        val hasNext = doc.select("a[href]").any { a ->
+            val href = a.attr("href")
+            href.contains("?$next") || href.contains("&$next")
+        }
+        return KhAlbumPage(albums, page, hasNext)
+    }
 
     fun albumUrl(albumId: String): String = "$BASE_URL$ALBUM_PREFIX$albumId"
 

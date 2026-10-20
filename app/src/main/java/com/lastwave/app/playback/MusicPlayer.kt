@@ -652,6 +652,11 @@ class MusicPlayer @Inject constructor(
             val uri = dataSpec.uri.toString()
             val page = com.lastwave.app.data.khinsider.KhInsiderParser.pagePathOf(uri)
                 ?: return@Factory dataSpec
+            // A downloaded copy plays from the phone, even offline.
+            khInsider.downloadedLocation(page)?.let { local ->
+                val localUri = if (local.startsWith("/")) Uri.fromFile(java.io.File(local)) else Uri.parse(local)
+                return@Factory dataSpec.buildUpon().setUri(localUri).setKey(null).build()
+            }
             val fileUrl = khInsider.resolveFileUrlBlocking(page)
             dataSpec.buildUpon()
                 .setUri(Uri.parse(fileUrl))
@@ -7686,7 +7691,7 @@ class MusicPlayer @Inject constructor(
         val queuedUrl = track.playbackUrl ?: return
         // KHInsider: measure the real file (FLAC header / MP3) behind the page.
         val url = com.lastwave.app.data.khinsider.KhInsiderParser.pagePathOf(queuedUrl)?.let { page ->
-            runCatching { khInsider.resolveFileUrlBlocking(page) }.getOrNull() ?: return
+            runCatching { khInsider.playbackSourceBlocking(page) }.getOrNull() ?: return
         } ?: queuedUrl
         val retriever = android.media.MediaMetadataRetriever()
         try {
@@ -8315,6 +8320,16 @@ fun GeneratedTrack.toPlayableTrack(): PlayableTrack {
             artworkUrl = artworkUrl,
             playbackUrl = url,
             playbackMimeType = com.lastwave.app.data.generate.LocalAudioFormats.mimeFor(url),
+        )
+    }
+    if (com.lastwave.app.data.generate.isKhInsiderUrl(url)) {
+        // KHInsider: the track page rides along; the player reads the file link.
+        return PlayableTrack(
+            title = name,
+            artist = artist,
+            album = album,
+            artworkUrl = artworkUrl,
+            playbackUrl = url,
         )
     }
     val videoId = youtubeVideoIdOrNull()

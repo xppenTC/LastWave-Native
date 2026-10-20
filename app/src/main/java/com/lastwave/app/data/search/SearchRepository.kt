@@ -23,8 +23,13 @@ import java.net.URLEncoder
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** [GAMES] searches video game soundtracks on KHInsider (albums only). */
-enum class SearchTab { TRACKS, ARTISTS, ALBUMS, PLAYLISTS, USERS, GAMES }
+/**
+ * [GAMES] searches video game soundtracks on KHInsider by album name,
+ * [GAMES_SONGS] by song name (results are the albums holding those songs).
+ */
+enum class SearchTab { TRACKS, ARTISTS, ALBUMS, PLAYLISTS, USERS, GAMES, GAMES_SONGS }
+
+val SearchTab.isGames: Boolean get() = this == SearchTab.GAMES || this == SearchTab.GAMES_SONGS
 
 @Immutable
 data class SearchResultItem(
@@ -138,7 +143,7 @@ class SearchRepository @Inject constructor(
                 val key = sessionPreferences.session.first().apiKey
                 if (key.isBlank()) emptyList() else lookupUser(key, trimmed)
             }
-            SearchTab.GAMES -> khInsider.search(trimmed).map { album ->
+            SearchTab.GAMES, SearchTab.GAMES_SONGS -> khInsider.search(trimmed, songNames = tab == SearchTab.GAMES_SONGS).map { album ->
                 SearchResultItem(
                     name = album.name,
                     artworkUrl = album.thumbnailUrl,
