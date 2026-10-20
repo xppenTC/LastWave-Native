@@ -31,6 +31,8 @@ data class SearchUiState(
     val suggestions: List<String> = emptyList(),
     val recentSearches: List<String> = emptyList(),
     val isShowingSuggestions: Boolean = false,
+    /** Why a video-game (KHInsider) search failed, shown instead of "no results". */
+    val errorMessage: String? = null,
 )
 
 /**
@@ -183,14 +185,15 @@ class SearchViewModel @Inject constructor(
                     }, sourceLabel = "Search")
                 }
             }
-            SearchTab.PLAYLISTS, SearchTab.USERS -> Unit
+            // Video-game albums open their own screen (see SearchScreen).
+            SearchTab.PLAYLISTS, SearchTab.USERS, SearchTab.GAMES -> Unit
         }
     }
 
     private suspend fun runSearch(query: String, saveToHistory: Boolean) {
         val tab = _uiState.value.tab
         lastIssuedQuery = query
-        _uiState.update { it.copy(status = SearchStatus.LOADING) }
+        _uiState.update { it.copy(status = SearchStatus.LOADING, errorMessage = null) }
         if (saveToHistory) {
             historyRepository.add(query)
         }
@@ -208,7 +211,13 @@ class SearchViewModel @Inject constructor(
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             if (lastIssuedQuery != query || _uiState.value.query.trim() != query.trim() || _uiState.value.tab != tab) return
-            _uiState.update { it.copy(status = SearchStatus.EMPTY, results = emptyList()) }
+            _uiState.update {
+                it.copy(
+                    status = SearchStatus.EMPTY,
+                    results = emptyList(),
+                    errorMessage = if (tab == SearchTab.GAMES) e.message else null,
+                )
+            }
         }
     }
 

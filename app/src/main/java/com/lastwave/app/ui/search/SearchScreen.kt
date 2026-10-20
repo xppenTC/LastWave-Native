@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
@@ -137,6 +138,8 @@ fun SearchScreen(
     // Long-press (deep press) on a TRACKS row opens the mini tray;
     // the overflow button keeps the full sheet.
     var miniTrayItem by remember { mutableStateOf<SearchResultItem?>(null) }
+    // Video-game (KHInsider) album opened from the GAMES filter.
+    var gameAlbum by remember { mutableStateOf<SearchResultItem?>(null) }
     val focusManager = LocalFocusManager.current
 
     Box(
@@ -231,8 +234,11 @@ fun SearchScreen(
                                 ) {
                                     if (state.query.isEmpty()) {
                                         Text(
-                                            text = if (state.tab == SearchTab.USERS) stringResource(R.string.search_hint_users)
-                                            else stringResource(R.string.search_hint_yt),
+                                            text = when (state.tab) {
+                                                SearchTab.USERS -> stringResource(R.string.search_hint_users)
+                                                SearchTab.GAMES -> stringResource(R.string.khinsider_search_hint)
+                                                else -> stringResource(R.string.search_hint_yt)
+                                            },
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.74f),
                                             maxLines = 1,
@@ -460,6 +466,16 @@ fun SearchScreen(
                                     )
                                     Spacer(Modifier.height(10.dp))
                                     Text(stringResource(R.string.search_no_results, state.query), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    if (state.tab == SearchTab.GAMES) {
+                                        Spacer(Modifier.height(6.dp))
+                                        Text(
+                                            state.errorMessage?.let { stringResource(R.string.khinsider_error, it) }
+                                                ?: stringResource(R.string.khinsider_min_chars),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(horizontal = 32.dp),
+                                        )
+                                    }
                                 }
                             }
                             SearchStatus.RESULTS -> {
@@ -487,6 +503,7 @@ fun SearchScreen(
                                                         SearchTab.ARTISTS -> onOpenArtist(topResult.name, topResult.entityId)
                                                         SearchTab.ALBUMS -> onOpenAlbum(topResult.name, topResult.artist.orEmpty(), topResult.entityId)
                                                         SearchTab.PLAYLISTS -> topResult.entityId?.let(onOpenPlaylist)
+                                                        SearchTab.GAMES -> gameAlbum = topResult
                                                         else -> viewModel.playResult(topResult)
                                                     }
                                                 },
@@ -498,7 +515,7 @@ fun SearchScreen(
                                                         SearchTab.TRACKS -> TrackMenuTarget.Track(topResult.name, topResult.artist.orEmpty(), topResult.url)
                                                         SearchTab.ARTISTS -> TrackMenuTarget.Artist(topResult.name, topResult.url)
                                                         SearchTab.ALBUMS -> TrackMenuTarget.Album(topResult.name, topResult.artist.orEmpty(), topResult.url)
-                                                        SearchTab.PLAYLISTS, SearchTab.USERS -> null
+                                                        SearchTab.PLAYLISTS, SearchTab.USERS, SearchTab.GAMES -> null
                                                     }
                                                 },
                                             )
@@ -524,6 +541,7 @@ fun SearchScreen(
                                                     SearchTab.ARTISTS -> onOpenArtist(item.name, item.entityId)
                                                     SearchTab.ALBUMS -> onOpenAlbum(item.name, item.artist.orEmpty(), item.entityId)
                                                     SearchTab.PLAYLISTS -> item.entityId?.let(onOpenPlaylist)
+                                                    SearchTab.GAMES -> gameAlbum = item
                                                     else -> viewModel.playResult(item)
                                                 }
                                             },
@@ -537,7 +555,7 @@ fun SearchScreen(
                                                     SearchTab.TRACKS -> TrackMenuTarget.Track(item.name, item.artist.orEmpty(), item.url)
                                                     SearchTab.ARTISTS -> TrackMenuTarget.Artist(item.name, item.url)
                                                     SearchTab.ALBUMS -> TrackMenuTarget.Album(item.name, item.artist.orEmpty(), item.url)
-                                                    SearchTab.PLAYLISTS, SearchTab.USERS -> null
+                                                    SearchTab.PLAYLISTS, SearchTab.USERS, SearchTab.GAMES -> null
                                                 }
                                             },
                                         )
@@ -558,6 +576,15 @@ fun SearchScreen(
             capabilities = TrackMenuCapabilities(showCopyActions = true, showDeleteScrobble = true),
             playbackSourceLabel = "Search",
             onDismiss = { menuTarget = null },
+        )
+    }
+
+    gameAlbum?.let { album ->
+        com.lastwave.app.ui.search.khinsider.KhInsiderAlbumDialog(
+            albumId = album.entityId.orEmpty(),
+            fallbackTitle = album.name,
+            fallbackArtwork = album.artworkUrl,
+            onDismiss = { gameAlbum = null },
         )
     }
 
@@ -629,6 +656,7 @@ private fun TopResultCard(
                 SearchTab.ALBUMS -> Icons.Filled.Album
                 SearchTab.PLAYLISTS -> Icons.AutoMirrored.Filled.QueueMusic
                 SearchTab.USERS -> Icons.Filled.Person
+                SearchTab.GAMES -> Icons.Filled.SportsEsports
             }
             Box(
                 modifier = Modifier
@@ -662,6 +690,7 @@ private fun TopResultCard(
                             SearchTab.ALBUMS -> "TOP ALBUM"
                             SearchTab.PLAYLISTS -> "TOP PLAYLIST"
                             SearchTab.USERS -> "USER"
+                            SearchTab.GAMES -> "TOP OST"
                         },
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.ExtraBold,
@@ -682,6 +711,7 @@ private fun TopResultCard(
                     SearchTab.PLAYLISTS -> item.subtitle.orEmpty()
                     SearchTab.ARTISTS -> item.subtitle.orEmpty().ifBlank { "Artist" }
                     SearchTab.USERS -> item.artist.orEmpty()
+                    SearchTab.GAMES -> item.subtitle.orEmpty()
                 }
                 if (subtitle.isNotBlank()) {
                         Text(
@@ -704,8 +734,8 @@ private fun TopResultCard(
                 modifier = Modifier.size(46.dp),
             ) {
                 Icon(
-                    if (tab == SearchTab.PLAYLISTS) Icons.AutoMirrored.Filled.ArrowForward else Icons.Filled.PlayArrow,
-                    contentDescription = if (tab == SearchTab.PLAYLISTS) "Open playlist" else "Play top result",
+                    if (tab == SearchTab.PLAYLISTS || tab == SearchTab.GAMES) Icons.AutoMirrored.Filled.ArrowForward else Icons.Filled.PlayArrow,
+                    contentDescription = if (tab == SearchTab.PLAYLISTS || tab == SearchTab.GAMES) "Open" else "Play top result",
                     tint = MaterialTheme.colorScheme.onPrimary,
                     modifier = Modifier.size(26.dp),
                 )
@@ -867,7 +897,11 @@ private fun SearchResultRow(
             .combinedClickable(
                 enabled = tab != SearchTab.USERS,
                 onClick = onClick,
-                onLongClick = if (tab == SearchTab.TRACKS) onLongClick else onMenu,
+                onLongClick = when (tab) {
+                    SearchTab.TRACKS -> onLongClick
+                    SearchTab.GAMES -> null
+                    else -> onMenu
+                },
             )
             .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -878,6 +912,7 @@ private fun SearchResultRow(
             SearchTab.ALBUMS -> Icons.Filled.Album
             SearchTab.PLAYLISTS -> Icons.AutoMirrored.Filled.QueueMusic
             SearchTab.USERS -> Icons.Filled.Person
+            SearchTab.GAMES -> Icons.Filled.SportsEsports
         }
         Box(modifier = Modifier.size(44.dp)) {
             ArtworkImage(
@@ -908,6 +943,7 @@ private fun SearchResultRow(
                 SearchTab.PLAYLISTS -> item.subtitle.orEmpty()
                 SearchTab.ARTISTS -> item.subtitle.orEmpty()
                 SearchTab.USERS -> listOfNotNull(item.artist, item.listeners?.let { "$it scrobbles" }).joinToString(" \u00b7 ")
+                SearchTab.GAMES -> item.subtitle.orEmpty()
             }
             if (subtitle.isNotBlank()) {
                 Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -920,7 +956,7 @@ private fun SearchResultRow(
             IconButton(onClick = { openLastFm("/+removefriend") }) {
                 Icon(Icons.Filled.PersonRemove, contentDescription = stringResource(R.string.search_unfollow_cd, item.name))
             }
-        } else if (tab != SearchTab.PLAYLISTS) {
+        } else if (tab != SearchTab.PLAYLISTS && tab != SearchTab.GAMES) {
             com.lastwave.app.ui.common.OverflowMenuButton(onClick = onMenu)
         }
     }
@@ -939,8 +975,9 @@ private fun SearchFilterPills(
         SearchTab.PLAYLISTS to R.string.search_tab_playlists,
         SearchTab.USERS to R.string.search_tab_users,
     )
+    Column(modifier = modifier.fillMaxWidth()) {
     Row(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -980,6 +1017,50 @@ private fun SearchFilterPills(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp),
                 )
             }
+        }
+    }
+    Spacer(Modifier.height(8.dp))
+    GamesFilterButton(
+        selected = selectedTab == SearchTab.GAMES,
+        onClick = { onTabSelected(SearchTab.GAMES) },
+    )
+    }
+}
+
+/**
+ * Video-game soundtracks (KHInsider) on its own full-width row, in the
+ * tertiary colour so it stands apart from the YouTube Music filters.
+ */
+@Composable
+private fun GamesFilterButton(selected: Boolean, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val container = if (selected) scheme.tertiary else scheme.tertiaryContainer
+    val content = if (selected) scheme.onTertiary else scheme.onTertiaryContainer
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = container,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.SportsEsports, contentDescription = null, tint = content, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(10.dp))
+            Text(
+                stringResource(R.string.khinsider_filter),
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                color = content,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                "KHInsider",
+                style = MaterialTheme.typography.labelSmall,
+                color = content.copy(alpha = 0.75f),
+            )
         }
     }
 }
