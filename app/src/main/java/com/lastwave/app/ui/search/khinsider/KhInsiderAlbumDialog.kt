@@ -1,7 +1,6 @@
 package com.lastwave.app.ui.search.khinsider
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -75,15 +74,12 @@ import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
 import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 import com.lastwave.app.ui.player.LocalMusicPlayer
-import java.text.Normalizer
 
 /**
  * Full-screen KHInsider album drawn over the Search screen (not a dialog
  * window, so the player, its playlist picker and the track menu stay on top):
  * cover, format choice, play / shuffle, add the whole album to a playlist,
  * download it, and the track list with a menu per track.
- *
- * [highlight] (a song-name search) marks the matching tracks and scrolls to them.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -91,7 +87,6 @@ fun KhInsiderAlbumOverlay(
     albumId: String,
     fallbackTitle: String,
     fallbackArtwork: String?,
-    highlight: String?,
     onDismiss: () -> Unit,
     viewModel: KhInsiderAlbumViewModel = hiltViewModel(key = "khinsider_album"),
 ) {
@@ -140,7 +135,6 @@ fun KhInsiderAlbumOverlay(
                     fallbackArtwork = fallbackArtwork,
                     format = format,
                     playingUrl = playingUrl,
-                    highlight = highlight,
                     downloadState = { index, track ->
                         when {
                             track.pagePath in saved -> KhTrackDownload.Saved
@@ -207,17 +201,6 @@ fun KhInsiderAlbumOverlay(
     }
 }
 
-/** Accent- and case-insensitive "every word of the query is in the title". */
-internal fun matchesSongQuery(title: String, query: String?): Boolean {
-    if (query.isNullOrBlank()) return false
-    fun fold(s: String) = Normalizer.normalize(s, Normalizer.Form.NFD)
-        .replace(Regex("\\p{Mn}+"), "").lowercase()
-    val haystack = fold(title)
-    return fold(query).split(Regex("\\W+")).filter { it.isNotBlank() }.let { words ->
-        words.isNotEmpty() && words.all { it in haystack }
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun AlbumContent(
@@ -225,7 +208,6 @@ private fun AlbumContent(
     fallbackArtwork: String?,
     format: KhFormat,
     playingUrl: String?,
-    highlight: String?,
     downloadState: (Int, KhTrack) -> KhTrackDownload,
     onFormat: (KhFormat) -> Unit,
     onPlay: (index: Int, shuffled: Boolean) -> Unit,
@@ -235,11 +217,6 @@ private fun AlbumContent(
     onDownloadTrack: (Int) -> Unit,
 ) {
     val listState = rememberLazyListState()
-    val firstMatch = remember(album, highlight) { album.tracks.indexOfFirst { matchesSongQuery(it.name, highlight) } }
-    LaunchedEffect(firstMatch) {
-        // +1: the header is the first item.
-        if (firstMatch >= 0) listState.animateScrollToItem(firstMatch + 1)
-    }
     LazyColumn(
         state = listState,
         contentPadding = PaddingValues(bottom = 32.dp + LocalMiniPlayerScrollClearance.current),
@@ -338,15 +315,10 @@ private fun AlbumContent(
         val multiDisc = album.tracks.mapNotNull { it.disc }.distinct().size > 1
         itemsIndexed(album.tracks, key = { _, t -> t.pagePath }) { index, track ->
             val playing = playingUrl == KhInsiderParser.playbackUri(track.pagePath)
-            val matched = matchesSongQuery(track.name, highlight)
-            val accent = playing || matched
+            val accent = playing
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(
-                        if (matched) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-                        else androidx.compose.ui.graphics.Color.Transparent,
-                    )
                     .combinedClickable(onClick = { onPlay(index, false) }, onLongClick = { onMenu(track) })
                     .padding(start = 16.dp, top = 4.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,

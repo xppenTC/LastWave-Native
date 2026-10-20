@@ -198,12 +198,6 @@ fun KhInsiderBrowseSection(
                 BrowseChip(stringResource(R.string.khinsider_browse_more_years), emphasized = true) { showAllYears = true }
             }
         }
-        Spacer(Modifier.height(16.dp))
-        Text(
-            stringResource(R.string.khinsider_browse_tip),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 
     if (showAllPlatforms) {

@@ -67,9 +67,8 @@ object KhInsiderParser {
     private val TRACK_NUMBER = Regex("""^(\d+)\.$""")
     private val FILE_LINK = Regex("""^https?://[^/]+/(?:soundtracks|ost)/.+""", RegexOption.IGNORE_CASE)
 
-    fun searchUrl(query: String, songNames: Boolean = false): String =
-        "$BASE_URL/search?search=${URLEncoder.encode(query.trim(), "UTF-8")}" +
-            if (songNames) "&type=song" else ""
+    fun searchUrl(query: String): String =
+        "$BASE_URL/search?search=${URLEncoder.encode(query.trim(), "UTF-8")}"
 
     /** Popular lists, as linked from the site's menu. */
     val POPULAR_LISTS = listOf(

@@ -7,7 +7,6 @@ import com.lastwave.app.data.search.SearchHistoryRepository
 import com.lastwave.app.data.search.SearchRepository
 import com.lastwave.app.data.search.SearchResultItem
 import com.lastwave.app.data.search.SearchTab
-import com.lastwave.app.data.search.isGames
 import com.lastwave.app.playback.MusicPlayer
 import com.lastwave.app.playback.PlayableTrack
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -187,7 +186,7 @@ class SearchViewModel @Inject constructor(
                 }
             }
             // Video-game albums open their own screen (see SearchScreen).
-            SearchTab.PLAYLISTS, SearchTab.USERS, SearchTab.GAMES, SearchTab.GAMES_SONGS -> Unit
+            SearchTab.PLAYLISTS, SearchTab.USERS, SearchTab.GAMES -> Unit
         }
     }
 
@@ -216,7 +215,7 @@ class SearchViewModel @Inject constructor(
                 it.copy(
                     status = SearchStatus.EMPTY,
                     results = emptyList(),
-                    errorMessage = if (tab.isGames) e.message else null,
+                    errorMessage = if (tab == SearchTab.GAMES) e.message else null,
                 )
             }
         }

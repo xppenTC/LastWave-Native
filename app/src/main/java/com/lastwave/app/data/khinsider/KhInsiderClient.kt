@@ -107,12 +107,11 @@ class KhInsiderClient @Inject constructor(
         runCatching { KhFormat.valueOf(prefs.getString(KEY_FORMAT, null) ?: KhFormat.FLAC.name) }
             .getOrDefault(KhFormat.FLAC)
 
-    /** Albums by name, or (with [songNames]) albums containing a song with that name. */
-    suspend fun search(query: String, songNames: Boolean = false): List<KhAlbumSummary> = withContext(Dispatchers.IO) {
+    suspend fun search(query: String): List<KhAlbumSummary> = withContext(Dispatchers.IO) {
         val trimmed = query.trim()
         // KHInsider refuses searches shorter than three characters.
         if (trimmed.length < 3) return@withContext emptyList()
-        val page = fetch(KhInsiderParser.searchUrl(trimmed, songNames))
+        val page = fetch(KhInsiderParser.searchUrl(trimmed))
         // An exact match redirects straight to the album page.
         if (KhInsiderParser.isAlbumPage(page.finalUrl)) {
             val id = KhInsiderParser.albumIdOf(page.finalUrl) ?: return@withContext emptyList()

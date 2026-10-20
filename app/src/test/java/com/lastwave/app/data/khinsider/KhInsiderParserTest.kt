@@ -1,7 +1,6 @@
 package com.lastwave.app.data.khinsider
 
 import com.google.common.truth.Truth.assertThat
-import com.lastwave.app.ui.search.khinsider.matchesSongQuery
 import org.junit.Test
 
 /**
@@ -207,20 +206,9 @@ class KhInsiderParserTest {
     }
 
     @Test
-    fun buildsListAndSongSearchUrls() {
+    fun buildsListUrls() {
         assertThat(KhInsiderParser.listUrl("/top40", 1)).isEqualTo("https://downloads.khinsider.com/top40")
         assertThat(KhInsiderParser.listUrl("/game-soundtracks/year/2024", 3))
             .isEqualTo("https://downloads.khinsider.com/game-soundtracks/year/2024?page=3")
-        assertThat(KhInsiderParser.searchUrl("great fairy", songNames = true))
-            .isEqualTo("https://downloads.khinsider.com/search?search=great+fairy&type=song")
-    }
-
-    @Test
-    fun songQueryMatchesEveryWordIgnoringCaseAndAccents() {
-        val match = ::matchesSongQuery
-        assertThat(match("Great Fairy's Fountain", "fairy fountain")).isTrue()
-        assertThat(match("Pokémon Center", "pokemon")).isTrue()
-        assertThat(match("Main Theme", "fairy")).isFalse()
-        assertThat(match("Main Theme", null)).isFalse()
     }
 }

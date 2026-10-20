@@ -1202,9 +1202,6 @@
     <string name="khinsider_play">Play</string>
     <string name="khinsider_shuffle">Shuffle</string>
     <string name="khinsider_attribution">Soundtracks from downloads.khinsider.com, a donation-funded archive.</string>
-    <string name="khinsider_search_hint_songs">Search a song title from a game…</string>
-    <string name="khinsider_mode_albums">Albums</string>
-    <string name="khinsider_mode_songs">Song titles</string>
     <string name="khinsider_add_album">Add album to a playlist</string>
     <string name="khinsider_download_album">Download album</string>
     <string name="khinsider_download_track">Download</string>
@@ -1222,7 +1219,6 @@
     <string name="khinsider_browse_all_platforms">All platforms…</string>
     <string name="khinsider_browse_years">Years</string>
     <string name="khinsider_browse_more_years">Older…</string>
-    <string name="khinsider_browse_tip">Type to search albums, or switch to “Song titles” to find the albums containing a song.</string>
     <string name="khinsider_platform_filter">Filter platforms</string>
     <string name="khinsider_list_top40">Top 40</string>
     <string name="khinsider_list_top6m">Top 100 · last 6 months</string>
