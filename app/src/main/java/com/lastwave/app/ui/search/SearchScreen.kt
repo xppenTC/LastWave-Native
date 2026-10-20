@@ -56,6 +56,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -1058,13 +1061,13 @@ private fun SearchFilterPills(
     )
     if (selectedTab.isGames) {
         Spacer(Modifier.height(8.dp))
-        androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
             listOf(SearchTab.GAMES to R.string.khinsider_mode_albums, SearchTab.GAMES_SONGS to R.string.khinsider_mode_songs)
                 .forEachIndexed { i, (tab, label) ->
-                    androidx.compose.material3.SegmentedButton(
+                    SegmentedButton(
                         selected = selectedTab == tab,
                         onClick = { onTabSelected(tab) },
-                        shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(index = i, count = 2),
+                        shape = SegmentedButtonDefaults.itemShape(index = i, count = 2),
                     ) { Text(stringResource(label), style = MaterialTheme.typography.labelLarge) }
                 }
         }

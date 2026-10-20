@@ -183,7 +183,7 @@ class DownloadMenuViewModel @Inject constructor(
             videoId = videoId,
             durationMs = durationMs,
             // KHInsider rows download their own file instead of a YouTube match.
-            directSource = playbackUrl?.takeIf(com.lastwave.app.data.generate::isKhInsiderUrl),
+            directSource = playbackUrl?.takeIf { com.lastwave.app.data.generate.isKhInsiderUrl(it) },
         )
         routeNavigator.navigateTo(com.lastwave.app.ui.navigation.Screen.Downloads.route)
     }

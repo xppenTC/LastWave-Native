@@ -626,7 +626,7 @@ class PlaylistViewModel @Inject constructor(
                 }
                 trackDownloadManager.downloadTrack(
                     track.name, track.artist, track.album, track.artworkUrl,
-                    directSource = track.url.takeIf(com.lastwave.app.data.generate::isKhInsiderUrl),
+                    directSource = track.url.takeIf { com.lastwave.app.data.generate.isKhInsiderUrl(it) },
                 )
                 queued++
             }
