@@ -8131,7 +8131,9 @@ class MusicPlayer @Inject constructor(
             .filter { it.title.isNotBlank() && it.artist.isNotBlank() }
             .map {
                 val isLocal = it.playbackUrl?.let { url ->
-                    url.startsWith("/") || url.startsWith("content://") || url.startsWith("file://")
+                    url.startsWith("/") || url.startsWith("content://") || url.startsWith("file://") ||
+                        // KHInsider page links are stable, unlike expiring stream URLs.
+                        com.lastwave.app.data.generate.isKhInsiderUrl(url)
                 } == true
                 if (isLocal) it else it.copy(playbackUrl = null, playbackMimeType = null)
             }
@@ -8201,7 +8203,9 @@ class MusicPlayer @Inject constructor(
         val endIndex = minOf(sourceQueue.size, startIndex + MAX_PERSISTED_QUEUE_SIZE)
         val persistedQueue = sourceQueue.subList(startIndex, endIndex).map {
             val isLocal = it.playbackUrl?.let { url ->
-                url.startsWith("/") || url.startsWith("content://") || url.startsWith("file://")
+                url.startsWith("/") || url.startsWith("content://") || url.startsWith("file://") ||
+                    // KHInsider page links are stable, unlike expiring stream URLs.
+                    com.lastwave.app.data.generate.isKhInsiderUrl(url)
             } == true
             if (isLocal) it else it.copy(playbackUrl = null, playbackMimeType = null)
         }
