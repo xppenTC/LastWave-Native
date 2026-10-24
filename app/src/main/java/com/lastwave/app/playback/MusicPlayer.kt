@@ -2133,11 +2133,18 @@ class MusicPlayer @Inject constructor(
         }
 
         applicationScope.launch {
-            // Route changes (jack, Bluetooth, USB): re-decide which path is wanted.
+            // Route changes (jack, Bluetooth, USB) and any device plugged or
+            // unplugged: re-decide which path is wanted.
             var lastRoute: InternalRoute? = null
-            internalDirectOutput.availability.collect { availability ->
-                if (availability.route == lastRoute) return@collect
+            var lastDeviceChange = -1
+            kotlinx.coroutines.flow.combine(
+                internalDirectOutput.availability,
+                internalDirectOutput.deviceChanges,
+                ::Pair,
+            ).collect { (availability, deviceChange) ->
+                if (availability.route == lastRoute && deviceChange == lastDeviceChange) return@collect
                 lastRoute = availability.route
+                lastDeviceChange = deviceChange
                 audioSinks.forEach { sink -> runCatching { sink.retryInternalDirect() } }
                 onMain {
                     applyDacRoutingFor(currentSourceRateHz())

@@ -25,6 +25,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -157,6 +158,15 @@ class InternalDirectOutput @Inject constructor(
 
     private val _session = MutableStateFlow<InternalDirectSession?>(null)
     val session: StateFlow<InternalDirectSession?> = _session.asStateFlow()
+
+    private val _deviceChanges = MutableStateFlow(0)
+    /**
+     * Bumped on every output device added or removed, even when the route class
+     * stays the same (Android Auto over USB may keep the same route class, or
+     * report the old device for a moment): a refusal on the old output must
+     * still be retried.
+     */
+    val deviceChanges: StateFlow<Int> = _deviceChanges.asStateFlow()
 
     /** Last reason the stream could not engage while wanted (null once it engages). */
     @Volatile var lastFailure: InternalDirectReason? = null
@@ -625,12 +635,18 @@ class InternalDirectOutput @Inject constructor(
         // A new route is a new output: forget what the old one accepted.
         // Off the main thread: configure() may hold the lock while opening.
         scope.launch {
-            synchronized(openLock) {
-                openCache.clear()
-                mixedRoutes.clear()
-                cachedProbe = null
+            // Twice: right at the callback Android may still route to the old
+            // output (Android Auto teardown); the second pass runs once it settled.
+            repeat(2) { pass ->
+                if (pass > 0) delay(ROUTE_SETTLE_MS)
+                synchronized(openLock) {
+                    openCache.clear()
+                    mixedRoutes.clear()
+                    cachedProbe = null
+                }
+                refreshAvailability()
+                _deviceChanges.update { it + 1 }
             }
-            refreshAvailability()
         }
     }
 
@@ -658,6 +674,7 @@ class InternalDirectOutput @Inject constructor(
         private const val OUT_CHANNELS = 2
         private const val PROBE_DEBOUNCE_MS = 600L
         private const val DRAIN_MARGIN_MS = 15L
+        private const val ROUTE_SETTLE_MS = 2_000L
 
         private val NATIVE_OK: Boolean get() = InternalDirectStream.nativeLoaded
 
