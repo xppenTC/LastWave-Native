@@ -89,6 +89,8 @@ class SettingsViewModel @Inject constructor(
     private val generateRepository: GenerateRepository,
     private val discoverRepository: com.lastwave.app.data.discover.DiscoverRepository,
     private val backupRepository: BackupRepository,
+    /** Google Drive sync with LastWave Desktop (Backup & Restore). */
+    val driveSync: com.lastwave.app.data.backup.DriveSyncManager,
     private val playlistRepository: PlaylistRepository,
     private val musicPlayer: MusicPlayer,
     private val downloadManager: TrackDownloadManager,

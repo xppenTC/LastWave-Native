@@ -94,6 +94,7 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Sync
+import kotlinx.coroutines.launch
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Colorize
 import androidx.compose.material.icons.filled.Contrast
@@ -493,6 +494,7 @@ fun SettingsScreen(
     val downloadCount by viewModel.downloadCount.collectAsStateWithLifecycle()
     val downloadTotalBytes by viewModel.downloadTotalBytes.collectAsStateWithLifecycle()
     val ytConnection by viewModel.ytConnection.collectAsStateWithLifecycle()
+    val drive by viewModel.driveSync.state.collectAsStateWithLifecycle()
     val ytSyncEnabled by viewModel.ytSyncEnabled.collectAsStateWithLifecycle()
     val ytHistorySyncEnabled by viewModel.ytHistorySyncEnabled.collectAsStateWithLifecycle()
     val ytSyncState by viewModel.ytSyncState.collectAsStateWithLifecycle()
@@ -572,6 +574,31 @@ fun SettingsScreen(
     // access, which the sync needs to put the merged file back.
     val syncLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) viewModel.syncWithFile(uri, appVersionName(context))
+    }
+
+    val driveScope = androidx.compose.runtime.rememberCoroutineScope()
+    val driveConsentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        val granted = runCatching { viewModel.driveSync.resultFromConsent(result.data).accessToken != null }
+            .getOrDefault(false)
+        if (granted) viewModel.driveSync.onConnected()
+    }
+    fun connectDrive() {
+        driveScope.launch {
+            runCatching { viewModel.driveSync.authorize() }
+                .onSuccess { auth ->
+                    val consent = auth.pendingIntent
+                    if (auth.hasResolution() && consent != null) {
+                        driveConsentLauncher.launch(
+                            androidx.activity.result.IntentSenderRequest.Builder(consent.intentSender).build(),
+                        )
+                    } else {
+                        viewModel.driveSync.onConnected()
+                    }
+                }
+                .onFailure { viewModel.showToast(context.getString(R.string.toast_file_sync_fail, it.message ?: "")) }
+        }
     }
 
     val csvPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -2084,7 +2111,7 @@ fun SettingsScreen(
                         item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel(stringResource(R.string.settings_section_backup))
-                    SettingsGroup(rowCount = 3) { index, position ->
+                    SettingsGroup(rowCount = if (drive.connected) 5 else 4) { index, position ->
                         when (index) {
                             0 -> SettingsActionCard(
                                 icon = Icons.Filled.Backup,
@@ -2124,6 +2151,39 @@ fun SettingsScreen(
                                 },
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "backup.sync"),
+                            )
+                            3 -> SettingsActionCard(
+                                icon = Icons.Filled.CloudSync,
+                                iconContainer = MaterialTheme.colorScheme.primaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                title = stringResource(
+                                    if (drive.connected) R.string.settings_drive_sync_now else R.string.settings_drive_connect,
+                                ),
+                                subtitle = when {
+                                    drive.syncing -> stringResource(R.string.settings_drive_syncing)
+                                    drive.error != null -> drive.error.orEmpty()
+                                    drive.lastSyncMillis != null -> stringResource(
+                                        R.string.settings_drive_last_sync,
+                                        java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT)
+                                            .format(java.util.Date(drive.lastSyncMillis!!)),
+                                    )
+                                    else -> stringResource(R.string.settings_drive_sub)
+                                },
+                                onClick = {
+                                    if (drive.connected) driveScope.launch { viewModel.driveSync.syncNow() } else connectDrive()
+                                },
+                                position = position,
+                                isHighlighted = (highlightedSettingId == "backup.drive"),
+                            )
+                            4 -> SettingsActionCard(
+                                icon = Icons.Filled.CloudDownload,
+                                iconContainer = MaterialTheme.colorScheme.primaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                title = stringResource(R.string.settings_drive_disconnect),
+                                subtitle = stringResource(R.string.settings_drive_disconnect_sub),
+                                onClick = { viewModel.driveSync.disconnect() },
+                                position = position,
+                                isHighlighted = false,
                             )
                         }
                     }
