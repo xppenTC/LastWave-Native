@@ -132,6 +132,7 @@ class SettingsClearAllDataTest {
             generateRepository = generateRepository,
             discoverRepository = discoverRepository,
             backupRepository = backupRepository,
+            driveSync = io.mockk.mockk(relaxed = true),
             playlistRepository = playlistRepository,
             musicPlayer = musicPlayer,
             downloadManager = downloadManager,
