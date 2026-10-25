@@ -91,6 +91,13 @@
     <string name="settings_restore">Restaurer</string>
     <string name="settings_restore_sub">Charge une sauvegarde ou un JSON de playlist</string>
     <string name="settings_sync">Synchroniser avec un fichier</string>
+    <string name="settings_drive_connect">Connecter Google Drive</string>
+    <string name="settings_drive_sub">Garde LastWave Desktop à jour automatiquement, via un fichier caché dans ton propre Google Drive</string>
+    <string name="settings_drive_sync_now">Synchro Google Drive</string>
+    <string name="settings_drive_syncing">Synchronisation…</string>
+    <string name="settings_drive_last_sync">Dernière synchro %1$s · touche pour synchroniser</string>
+    <string name="settings_drive_disconnect">Déconnecter Google Drive</string>
+    <string name="settings_drive_disconnect_sub">Arrête la synchro automatique ; le fichier Drive reste</string>
     <string name="settings_sync_sub">Fusionne dans les deux sens avec un fichier de sauvegarde partagé avec LastWave Desktop</string>
 
     <string name="settings_section_about">À propos</string>

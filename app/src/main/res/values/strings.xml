@@ -158,6 +158,13 @@
     <string name="settings_restore">Restore</string>
     <string name="settings_restore_sub">Load a backup or playlist JSON</string>
     <string name="settings_sync">Sync with file</string>
+    <string name="settings_drive_connect">Connect Google Drive</string>
+    <string name="settings_drive_sub">Keeps LastWave Desktop in step automatically, through a hidden file in your own Google Drive</string>
+    <string name="settings_drive_sync_now">Google Drive sync</string>
+    <string name="settings_drive_syncing">Syncing…</string>
+    <string name="settings_drive_last_sync">Last sync %1$s · tap to sync now</string>
+    <string name="settings_drive_disconnect">Disconnect Google Drive</string>
+    <string name="settings_drive_disconnect_sub">Stops the automatic sync; the Drive file stays</string>
     <string name="settings_sync_sub">Merge both ways with a backup file shared with LastWave Desktop</string>
 
     <string name="settings_section_about">About</string>
