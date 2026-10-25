@@ -209,6 +209,8 @@ android {
 
 dependencies {
     implementation("com.google.android.gms:play-services-cast-framework:22.3.1")
+    // Google Drive sync: drive.appdata authorization (no secret in the APK).
+    implementation("com.google.android.gms:play-services-auth:21.3.0")
     implementation("org.nanohttpd:nanohttpd:2.3.1")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

@@ -28,6 +28,7 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
     @Inject lateinit var streamExtractor: dagger.Lazy<com.lastwave.app.data.music.YouTubeStreamExtractor>
     @Inject lateinit var innerTubeMusicApi: dagger.Lazy<com.lastwave.app.data.music.InnerTubeMusicApi>
     @Inject lateinit var ytMusicSyncManager: dagger.Lazy<com.lastwave.app.data.ytmusic.YtMusicSyncManager>
+    @Inject lateinit var driveSyncManager: dagger.Lazy<com.lastwave.app.data.backup.DriveSyncManager>
     @Inject lateinit var ytMusicHistorySyncManager: dagger.Lazy<com.lastwave.app.data.ytmusic.YtMusicHistorySyncManager>
     @Inject lateinit var likedSongsManager: dagger.Lazy<com.lastwave.app.data.playlist.LikedSongsManager>
     @Inject lateinit var trackDownloadManager: dagger.Lazy<com.lastwave.app.data.download.TrackDownloadManager>
@@ -106,6 +107,9 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
             delay(OPTIONAL_STARTUP_DELAY_MS)
             runCatching { ytMusicSyncManager.get().start() }
                 .onFailure { com.lastwave.app.diagnostics.AppLog.e("LastWaveStartup", "YT sync startup disabled", it) }
+            // Google Drive sync with LastWave Desktop (no-ops until connected).
+            runCatching { driveSyncManager.get().start() }
+                .onFailure { com.lastwave.app.diagnostics.AppLog.e("LastWaveStartup", "Drive sync startup disabled", it) }
         }
         // YouTube Music playback-history sync (no-ops until an account is
         // connected AND history sync is enabled in Settings — on by default).
