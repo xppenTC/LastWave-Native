@@ -23,6 +23,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.scrollBy
@@ -39,6 +40,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -46,6 +48,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -54,6 +57,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
@@ -257,6 +261,11 @@ fun PlaylistDetailScreen(
     var isReorderLocked by remember { mutableStateOf(true) }
     var searchQuery by remember { mutableStateOf("") }
     var isSearchActive by remember { mutableStateOf(false) }
+    // Display keys of the rows picked for a move; null when not selecting.
+    var selectedKeys by remember(playlistId) { mutableStateOf<Set<String>?>(null) }
+    var moveDialogOpen by remember { mutableStateOf(false) }
+    val canMoveTracks = !playlist.isYouTubeOnly && playlist.mode != LOCAL_SONGS_MODE
+    androidx.activity.compose.BackHandler(enabled = selectedKeys != null) { selectedKeys = null }
 
     val displayTracks = remember(playlist.tracks, currentSort, sortAscending, searchQuery) {
         val sorted = when (currentSort) {
@@ -302,6 +311,7 @@ fun PlaylistDetailScreen(
     // Permanent reorder only makes sense on the stored order: Custom (ascending)
     // on a local playlist with the lock opened.
     val reorderEnabled = !isReorderLocked &&
+        selectedKeys == null &&
         !playlist.isYouTubeOnly &&
         currentSort == PlaylistTrackSort.CUSTOM &&
         sortAscending
@@ -770,8 +780,18 @@ fun PlaylistDetailScreen(
                         NativeTrackRow(
                             track = track,
                             isPlaying = isPlayingThisSong,
+                            selected = selectedKeys?.contains(stableKey),
+                            onLongClick = if (canMoveTracks) {
+                                { selectedKeys = selectedKeys.orEmpty() + stableKey }
+                            } else {
+                                null
+                            },
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                selectedKeys?.let { picked ->
+                                    selectedKeys = if (stableKey in picked) picked - stableKey else picked + stableKey
+                                    return@NativeTrackRow
+                                }
                                 if (displayTracks.isEmpty()) return@NativeTrackRow
                                 // index is from composition time; the list can
                                 // shrink (remove/move) before the tap lands —
@@ -1045,6 +1065,14 @@ fun PlaylistDetailScreen(
                             tonalElevation = 6.dp,
                             shadowElevation = 12.dp,
                         ) {
+                            if (canMoveTracks && playlist.tracks.isNotEmpty()) DropdownMenuItem(
+                                text = { Text(stringResource(com.lastwave.app.R.string.pd_select_songs)) },
+                                leadingIcon = { Icon(Icons.Filled.Checklist, contentDescription = null) },
+                                onClick = {
+                                    selectedKeys = emptySet()
+                                    overflowMenuOpen = false
+                                },
+                            )
                             DropdownMenuItem(
                                 text = { Text(if (playlist.isPinned) stringResource(com.lastwave.app.R.string.pd_unpin) else stringResource(com.lastwave.app.R.string.pd_pin_top)) },
                                 leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
@@ -1176,6 +1204,43 @@ fun PlaylistDetailScreen(
             }
         }
 
+        // Selection bar, drawn over the top bar while picking songs to move.
+        selectedKeys?.let { picked ->
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                shadowElevation = 6.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.TopCenter),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .adaptiveContentWidth(maxWidth = 860.dp)
+                        .windowInsetsPadding(WindowInsets.statusBars)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = { selectedKeys = null }) {
+                        Icon(Icons.Filled.Close, contentDescription = stringResource(com.lastwave.app.R.string.common_cancel))
+                    }
+                    Text(
+                        stringResource(com.lastwave.app.R.string.pl_selected_count, picked.size),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    val allPicked = displayKeys.isNotEmpty() && picked.containsAll(displayKeys)
+                    TextButton(onClick = { selectedKeys = if (allPicked) picked - displayKeys.toSet() else picked + displayKeys }) {
+                        Text(stringResource(if (allPicked) com.lastwave.app.R.string.ytimp_deselect_all else com.lastwave.app.R.string.ytimp_select_all))
+                    }
+                    Button(onClick = { moveDialogOpen = true }, enabled = picked.isNotEmpty()) {
+                        Text(stringResource(com.lastwave.app.R.string.pd_move_songs))
+                    }
+                }
+            }
+        }
+
         AnimatedVisibility(
             visible = state.regeneratingId == playlistId,
             enter = fadeIn() + scaleIn(),
@@ -1283,6 +1348,43 @@ fun PlaylistDetailScreen(
         )
     }
 
+    // Move target picker: local playlists that accept added songs, Liked Songs first.
+    if (moveDialogOpen) {
+        val targets = state.playlists
+            .filter { it.id != playlistId && !it.isYouTubeOnly && (it.mode == "custom" || it.mode == LIKED_SONGS_MODE) }
+            .sortedByDescending { it.mode == LIKED_SONGS_MODE }
+        AlertDialog(
+            onDismissRequest = { moveDialogOpen = false },
+            title = { Text(stringResource(com.lastwave.app.R.string.pd_move_to)) },
+            text = {
+                LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                    items(targets, key = { it.id }) { target ->
+                        Text(
+                            target.title,
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    // Only rows on screen move: a search filter narrows the move too.
+                                    val picked = selectedKeys.orEmpty()
+                                    viewModel.moveTracks(
+                                        playlistId,
+                                        target.id,
+                                        displayTracks.filterIndexed { i, _ -> displayKeys.getOrNull(i) in picked },
+                                    )
+                                    moveDialogOpen = false
+                                    selectedKeys = null
+                                }
+                                .padding(vertical = 14.dp),
+                        )
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { moveDialogOpen = false }) { Text(stringResource(com.lastwave.app.R.string.common_cancel)) } },
+        )
+    }
+
     // Delete confirmation dialog
     if (state.deleteConfirmForPlaylistId != null) {
         AlertDialog(
@@ -1364,6 +1466,8 @@ private fun NativeTrackRow(
     onClick: () -> Unit,
     onMenu: () -> Unit,
     dragHandle: (@Composable () -> Unit)? = null,
+    selected: Boolean? = null,
+    onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     com.lastwave.app.ui.common.ExpressiveGroupTrackRow(
@@ -1374,6 +1478,7 @@ private fun NativeTrackRow(
         position = com.lastwave.app.ui.common.GroupPosition.SINGLE,
         isPlaying = isPlaying,
         onClick = onClick,
+        onLongClick = onLongClick,
         modifier = modifier,
         leading = {
             Box(modifier = Modifier.size(52.dp)) {
@@ -1396,8 +1501,12 @@ private fun NativeTrackRow(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                dragHandle?.invoke()
-                com.lastwave.app.ui.common.OverflowMenuButton(onClick = onMenu)
+                if (selected != null) {
+                    androidx.compose.material3.Checkbox(checked = selected, onCheckedChange = null)
+                } else {
+                    dragHandle?.invoke()
+                    com.lastwave.app.ui.common.OverflowMenuButton(onClick = onMenu)
+                }
             }
         },
     )

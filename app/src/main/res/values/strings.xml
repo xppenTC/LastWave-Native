@@ -593,6 +593,9 @@
     <string name="pd_search_hint">Search in playlist</string>
     <string name="pd_search_cd">Search in playlist</string>
     <string name="pd_options_cd">Playlist options</string>
+    <string name="pd_select_songs">Select songs</string>
+    <string name="pd_move_songs">Move</string>
+    <string name="pd_move_to">Move to</string>
     <string name="pd_song_options_cd">Song options</string>
     <string name="pd_back_cd">Back</string>
     <string name="pd_shuffle_cd">Shuffle</string>

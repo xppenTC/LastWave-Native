@@ -79,6 +79,7 @@ class PlaylistViewModel @Inject constructor(
     private val innerTubeApi: com.lastwave.app.data.music.InnerTubeMusicApi,
     private val routeNavigator: com.lastwave.app.ui.navigation.AppRouteNavigator,
     private val localMusicLibrary: com.lastwave.app.data.localmusic.LocalMusicLibrary,
+    private val likedSongsManager: com.lastwave.app.data.playlist.LikedSongsManager,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PlaylistUiState())
@@ -491,6 +492,51 @@ class PlaylistViewModel @Inject constructor(
                     _uiState.update { it.copy(toastMessage = "Couldn't save new order") }
                     loadDetail(playlistId)
                 }
+        }
+    }
+
+    /**
+     * Moves songs from one local playlist to another. They are added to the
+     * target first and only then removed here, so a failure in between leaves
+     * a copy instead of losing songs. Liked Songs goes through
+     * [com.lastwave.app.data.playlist.LikedSongsManager] so the hearts follow.
+     */
+    fun moveTracks(sourceId: Long, targetId: Long, tracks: List<GeneratedTrack>) {
+        if (tracks.isEmpty() || sourceId < 0L || targetId < 0L) return
+        viewModelScope.launch {
+            try {
+                val target = playlistRepository.getById(targetId) ?: return@launch
+                if (target.mode == LIKED_SONGS_MODE) {
+                    likedSongsManager.mergeTracks(tracks)
+                } else {
+                    playlistRepository.addTracks(targetId, tracks)
+                }
+                // CAS retry, like LikedSongsManager.mergeTracks: a concurrent
+                // edit of the source makes the write fail instead of being lost.
+                var removed = false
+                repeat(3) {
+                    if (removed) return@repeat
+                    val source = playlistRepository.getById(sourceId) ?: return@repeat
+                    val left = source.tracks.toMutableList().apply { tracks.forEach { remove(it) } }
+                    removed = playlistRepository.replaceTracksForSync(sourceId, left, source.tracks) != null
+                }
+                _uiState.update {
+                    it.copy(
+                        toastMessage = if (removed) {
+                            "${tracks.size} songs moved to ${target.title}"
+                        } else {
+                            "Copied to ${target.title}, but couldn't remove them here"
+                        },
+                    )
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (e: Exception) {
+                android.util.Log.e("PlaylistViewModel", "Error moving songs", e)
+                _uiState.update { it.copy(toastMessage = "Couldn't move songs") }
+            }
+            loadDetail(sourceId)
+            load()
         }
     }
 

@@ -541,6 +541,9 @@
     <string name="pd_search_hint">Rechercher dans la playlist</string>
     <string name="pd_search_cd">Rechercher dans la playlist</string>
     <string name="pd_options_cd">Options de liste de lecture</string>
+    <string name="pd_select_songs">Sélectionner des morceaux</string>
+    <string name="pd_move_songs">Déplacer</string>
+    <string name="pd_move_to">Déplacer vers</string>
     <string name="pd_song_options_cd">Options de chanson</string>
     <string name="pd_back_cd">Retour</string>
     <string name="pd_shuffle_cd">Mélanger</string>
