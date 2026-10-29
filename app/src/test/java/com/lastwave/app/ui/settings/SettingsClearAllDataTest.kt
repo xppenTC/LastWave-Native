@@ -133,6 +133,7 @@ class SettingsClearAllDataTest {
             discoverRepository = discoverRepository,
             backupRepository = backupRepository,
             driveSync = io.mockk.mockk(relaxed = true),
+            harmonicFlowPreferences = io.mockk.mockk(relaxed = true),
             playlistRepository = playlistRepository,
             musicPlayer = musicPlayer,
             downloadManager = downloadManager,
