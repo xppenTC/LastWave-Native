@@ -160,6 +160,11 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
 
     override fun onCreate() {
         super.onCreate()
+        // Android Auto can start this service with no activity (process killed in the
+        // background): restore the last queue here too, or Play has nothing to resume
+        // and the car shows no track until the app is opened.
+        runCatching { musicPlayer.restoreSessionIfNeeded() }
+            .onFailure { android.util.Log.w("MusicPlaybackService", "Session restore failed", it) }
         val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
         playbackWakeLock = powerManager?.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
