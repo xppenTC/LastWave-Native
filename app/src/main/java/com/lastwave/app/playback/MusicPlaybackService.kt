@@ -226,8 +226,11 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                         if (rating?.ratingStyle == RatingCompat.RATING_HEART) setCurrentTrackLiked(rating.hasHeart())
                     }
                     override fun onCustomAction(action: String?, extras: Bundle?) {
-                        if (action == OriginOsMusicCard.ACTION_PLAY_MODE) {
-                            setOriginOsLoopMode(extras?.getInt(OriginOsMusicCard.KEY_LOOP_MODE) ?: 0)
+                        when (action) {
+                            OriginOsMusicCard.ACTION_PLAY_MODE ->
+                                setOriginOsLoopMode(extras?.getInt(OriginOsMusicCard.KEY_LOOP_MODE) ?: 0)
+                            ACTION_SHUFFLE -> musicPlayer.toggleShuffle()
+                            ACTION_REPEAT -> musicPlayer.cycleRepeatMode()
                         }
                     }
                     override fun onPlayFromSearch(query: String?, extras: Bundle?) {
@@ -1055,6 +1058,29 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                             PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or PlaybackStateCompat.ACTION_PLAY_FROM_SEARCH or
                             PlaybackStateCompat.ACTION_SET_SHUFFLE_MODE or PlaybackStateCompat.ACTION_SET_REPEAT_MODE or
                             PlaybackStateCompat.ACTION_SET_RATING,
+                    )
+                    // Android Auto shows only custom actions, never the shuffle/repeat flags above.
+                    .addCustomAction(
+                        PlaybackStateCompat.CustomAction.Builder(
+                            ACTION_SHUFFLE,
+                            if (state.shuffleEnabled) "Shuffle on" else "Shuffle off",
+                            if (state.shuffleEnabled) R.drawable.ic_widget_shuffle else R.drawable.ic_auto_shuffle_off,
+                        ).build(),
+                    )
+                    .addCustomAction(
+                        PlaybackStateCompat.CustomAction.Builder(
+                            ACTION_REPEAT,
+                            when (state.repeatMode) {
+                                androidx.media3.common.Player.REPEAT_MODE_ONE -> "Repeat one"
+                                androidx.media3.common.Player.REPEAT_MODE_ALL -> "Repeat all"
+                                else -> "Repeat off"
+                            },
+                            when (state.repeatMode) {
+                                androidx.media3.common.Player.REPEAT_MODE_ONE -> R.drawable.ic_widget_repeat_one
+                                androidx.media3.common.Player.REPEAT_MODE_ALL -> R.drawable.ic_widget_repeat
+                                else -> R.drawable.ic_auto_repeat_off
+                            },
+                        ).build(),
                     )
                     .setActiveQueueItemId(state.currentIndex.toLong())
                     .setBufferedPosition(state.bufferedPositionMs)
