@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.History
@@ -106,7 +107,11 @@ val DEFAULT_YT_MUSIC_SECTIONS = listOf(
     "Party",
     "Romance",
     "Sleep",
+    YT_OTHER_SHELVES,
 )
+
+/** Catch-all for the shelves YouTube Music adds on its own (seasonal, "100% hits"…) that no entry above names. */
+const val YT_OTHER_SHELVES = "Other YouTube shelves"
 
 data class UniversalSectionItem(
     val id: String,
@@ -139,6 +144,7 @@ private fun HomeSection.toUniversalItem(): UniversalSectionItem = UniversalSecti
         HomeSection.CHARTS -> Icons.Filled.TrendingUp
         HomeSection.NEW_RELEASES -> Icons.Filled.NewReleases
         HomeSection.FRIENDS -> Icons.Filled.Group
+        HomeSection.DISCOVER -> Icons.Filled.Explore
     },
 )
 

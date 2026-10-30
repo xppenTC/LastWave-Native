@@ -234,7 +234,8 @@ enum class HomeSection(val id: String, val titleRes: Int, val subtitleRes: Int) 
     ALBUMS("albums_in_rotation", com.lastwave.app.R.string.home_section_albums_title, com.lastwave.app.R.string.home_section_albums_sub),
     CHARTS("trending_charts", com.lastwave.app.R.string.home_section_charts_title, com.lastwave.app.R.string.home_section_charts_sub),
     NEW_RELEASES("new_releases", com.lastwave.app.R.string.home_section_releases_title, com.lastwave.app.R.string.home_section_releases_sub),
-    FRIENDS("friends_activity", com.lastwave.app.R.string.home_section_friends_title, com.lastwave.app.R.string.home_section_friends_sub);
+    FRIENDS("friends_activity", com.lastwave.app.R.string.home_section_friends_title, com.lastwave.app.R.string.home_section_friends_sub),
+    DISCOVER("discover_new_music", com.lastwave.app.R.string.feed_discover, com.lastwave.app.R.string.feed_discover_sub);
 
     companion object {
         fun fromId(id: String?): HomeSection? =

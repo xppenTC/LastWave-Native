@@ -398,23 +398,7 @@ fun FeedScreen(
                     }.distinctBy { it.name.trim().lowercase() }
                 }
 
-                val normalizedHidden = remember(ytHidden) {
-                    ytHidden.map { it.trim().lowercase() }.toSet()
-                }
-
-                fun isTitleHidden(title: String): Boolean {
-                    val t = title.trim().lowercase()
-                    return normalizedHidden.any { h ->
-                        t == h || t.startsWith(h) || h.startsWith(t) ||
-                        (h == "listen again" && (t.contains("listen again") || t.contains("jump back"))) ||
-                        (h == "quick picks" && (t.contains("quick pick") || t.contains("picked for you"))) ||
-                        (h == "mixed for you" && (t.contains("mixed for you") || t.contains("mixes"))) ||
-                        (h == "trending" && t.contains("trend")) ||
-                        (h == "new releases" && (t.contains("new release") || t.contains("fresh drop"))) ||
-                        (h == "community playlists" && t.contains("community")) ||
-                        (h == "forgotten favorites" && t.contains("forgotten"))
-                    }
-                }
+                fun isTitleHidden(title: String): Boolean = ytShelfHidden(title, ytHidden)
 
                 val visibleNativeShelves = remember(state.feedData.nativeShelves, ytHidden, ytOrder) {
                     state.feedData.nativeShelves
@@ -423,20 +407,7 @@ fun FeedScreen(
                             if (ytOrder.isEmpty()) list
                             else {
                                 list.sortedWith(compareBy { shelf ->
-                                    val t = shelf.title.trim().lowercase()
-                                    val idx = ytOrder.indexOfFirst { o ->
-                                        val opt = o.trim().lowercase()
-                                        t == opt || t.startsWith(opt) || opt.startsWith(t) ||
-                                        (opt == "listen again" && (t.contains("listen again") || t.contains("jump back"))) ||
-                                        (opt == "quick picks" && (t.contains("quick pick") || t.contains("picked for you"))) ||
-                                        (opt == "mixed for you" && (t.contains("mixed for you") || t.contains("mixes"))) ||
-                                        (opt == "trending" && t.contains("trend")) ||
-                                        (opt == "new releases" && t.contains("new release")) ||
-                                        (opt == "community playlists" && t.contains("community")) ||
-                                        (opt == "forgotten favorites" && t.contains("forgotten")) ||
-                                        (opt == "similar to" && t.contains("similar")) ||
-                                        (opt == "from your library" && t.contains("library"))
-                                    }
+                                    val idx = ytOrder.indexOfFirst { o -> ytShelfMatches(shelf.title, o) }
                                     if (idx >= 0) idx else 999
                                 })
                             }
@@ -483,7 +454,7 @@ fun FeedScreen(
                             }
                         }
                         if (showSynthetic && isSectionVisible(HomeSection.QUICK_PICKS) && !isTitleHidden("Quick picks") && state.feedData.quickPicks.isNotEmpty()) add("quick_picks")
-                        if (showSynthetic && discoveryTracks.isNotEmpty()) add("discover_new_music")
+                        if (showSynthetic && isSectionVisible(HomeSection.DISCOVER) && discoveryTracks.isNotEmpty()) add("discover_new_music")
                         if (showSynthetic && isSectionVisible(HomeSection.BECAUSE_YOU_LISTEN_TO) && state.feedData.becauseYouListenTo?.items?.isNotEmpty() == true) add("because_you_listen_to")
                         if (showSynthetic && isSectionVisible(HomeSection.FRESH_FINDS) && state.feedData.freshFinds.isNotEmpty()) add("fresh_finds")
                         if (showSynthetic && isSectionVisible(HomeSection.JUMP_BACK_IN) && !isTitleHidden("Listen again") && state.feedData.jumpBackIn.isNotEmpty()) add("jump_back_in")
@@ -828,7 +799,7 @@ fun FeedScreen(
                         }
                     }
 
-                    if (showSynthetic && discoveryTracks.isNotEmpty()) {
+                    if (showSynthetic && isSectionVisible(HomeSection.DISCOVER) && discoveryTracks.isNotEmpty()) {
                         item(key = "discover_new_music") {
                             HomeContainerSection(
                                 shape = getContainerShape("discover_new_music"),
