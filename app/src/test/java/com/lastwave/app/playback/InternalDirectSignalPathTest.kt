@@ -177,6 +177,13 @@ class InternalDirectSignalPathTest {
         val direct = evaluateSignalPath(input(trackSession(InternalRoute.WIRED, verified = true)))
         assertThat(signalMode(direct)).isEqualTo(SignalMode.DIRECT)
         assertThat(signalMode(direct.copy(parametricEqActive = true))).isEqualTo(SignalMode.DIRECT_EQ)
+        // OPUS at a lowered volume fails the purity checks but still bypasses the mixer.
+        val lossyMmap = evaluateSignalPath(
+            input(trackSession(InternalRoute.WIRED, verified = true).copy(backend = InternalBackend.MMAP, mmap = true))
+                .copy(sourceLabel = "OPUS", isLossless = false, systemVolume = 10, systemVolumeMax = 16),
+        )
+        assertThat(lossyMmap.directToHal).isFalse()
+        assertThat(signalMode(lossyMmap)).isEqualTo(SignalMode.DIRECT)
         val mixer = evaluateSignalPath(input(trackSession(InternalRoute.WIRED, verified = false)))
         assertThat(signalMode(mixer)).isEqualTo(SignalMode.MIXER)
         assertThat(signalMode(mixer.copy(parametricEqActive = true))).isEqualTo(SignalMode.MIXER_EQ)

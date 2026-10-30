@@ -665,12 +665,15 @@ enum class SignalMode(val labelRes: Int) {
 
 fun signalMode(report: SignalPathReport): SignalMode {
     val internal = report.internalSession
+    // The pill names the path, not the purity verdict: a lossy source or a lowered volume still goes direct.
+    val mixerBypassed = internal != null &&
+        (internal.backend != InternalBackend.DIRECT_TRACK || internal.directVerified)
     return when {
         report.bitPerfect -> SignalMode.BIT_PERFECT
         internal?.route == InternalRoute.ANDROID_AUTO -> SignalMode.ANDROID_AUTO
-        report.directToHal && report.parametricEqActive -> SignalMode.DIRECT_EQ
-        report.directToHal -> SignalMode.DIRECT
         internal?.route == InternalRoute.BLUETOOTH && internal.directVerified -> SignalMode.DIRECT_BLUETOOTH
+        mixerBypassed && report.parametricEqActive -> SignalMode.DIRECT_EQ
+        mixerBypassed -> SignalMode.DIRECT
         report.clockFallbackResampled && !report.internalDirectActive -> SignalMode.DAC_RESAMPLED
         report.parametricEqActive -> SignalMode.MIXER_EQ
         else -> SignalMode.MIXER

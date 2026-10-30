@@ -26,7 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Group
@@ -55,7 +55,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -274,24 +273,21 @@ fun HomeSectionsScreen(
                     currentSections.size,
                 ),
                 onBack = onBack,
+                // Icons only: the two text buttons squeezed the title down to "Sec…".
                 actions = {
-                    TextButton(onClick = {
+                    IconButton(onClick = {
                         currentHidden = emptySet()
                         viewModel.showAll()
                     }, enabled = currentHidden.isNotEmpty()) {
-                        Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Show all")
+                        Icon(Icons.Filled.Visibility, contentDescription = "Show all")
                     }
-                    TextButton(onClick = {
+                    IconButton(onClick = {
                         viewModel.resetAll()
                         currentSections = ALL_DEFAULT_UNIVERSAL_SECTIONS
                         currentHidden = emptySet()
                         currentPinned = emptySet()
                     }) {
-                        Icon(Icons.Filled.RestartAlt, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Reset")
+                        Icon(Icons.Filled.RestartAlt, contentDescription = "Reset")
                     }
                 },
             )
