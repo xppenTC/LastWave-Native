@@ -105,6 +105,7 @@ class NativeProcessingAudioSink(
     @Volatile private var internalActive = false
     @Volatile private var internalStartFailed = false
     @Volatile private var internalEnded = false
+    private val internalStall = OutputStallWatch(INTERNAL_STALL_MS)
     /** soxr output waiting for room in the exclusive ring (resampled mode). */
     private var pendingInternalFloat: ByteBuffer? = null
     private var pendingInternalPtsUs = 0L
@@ -417,6 +418,8 @@ class NativeProcessingAudioSink(
 
     override fun play() {
         playing = true
+        // The clock stood still during the pause: measure the stall from now.
+        internalStall.reset()
         if (usbExclusive) {
             exclusiveUsb?.setPaused(false)
             return
@@ -531,7 +534,21 @@ class NativeProcessingAudioSink(
             leaveExclusiveUsb(configureAndroid = true)
         }
         if (internalActive) {
-            if (handleInternalDirectBuffer(buffer, presentationTimeUs)) return true
+            if (handleInternalDirectBuffer(buffer, presentationTimeUs)) {
+                internalStall.reset()
+                return true
+            }
+            val output = internalDirect
+            if (!playing || output == null) {
+                internalStall.reset()
+            } else if (internalActive &&
+                internalStall.stalled(output.getCurrentPositionUs(), android.os.SystemClock.elapsedRealtime())
+            ) {
+                Log.w(TAG, "Internal direct output stopped consuming; back to the mixer path")
+                internalStall.reset()
+                internalStartFailed = true
+                leaveInternalDirect(configureAndroid = true)
+            }
             // Ring full: the endpoint is still playing, Media3 retries later.
             if (internalActive) return false
             // The stream died (route change): the rest of this buffer goes
@@ -1750,6 +1767,8 @@ class NativeProcessingAudioSink(
     private companion object {
         const val TAG = "NativeAudioSink"
         const val MICROS_PER_SECOND = 1_000_000L
+        /** Several times the ~500 ms output buffer: a live output always moves sooner. */
+        const val INTERNAL_STALL_MS = 3_000L
         val SUPPORTED_ENCODINGS = setOf(
             C.ENCODING_PCM_16BIT,
             C.ENCODING_PCM_24BIT,
