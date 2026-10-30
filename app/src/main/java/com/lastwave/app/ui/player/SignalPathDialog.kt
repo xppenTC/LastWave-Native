@@ -577,6 +577,7 @@ private fun routeLabel(route: InternalRoute): String = stringResource(
         InternalRoute.WIRED -> R.string.route_wired
         InternalRoute.BLUETOOTH -> R.string.route_bluetooth
         InternalRoute.USB -> R.string.route_usb
+        InternalRoute.ANDROID_AUTO -> R.string.route_android_auto
         InternalRoute.OTHER -> R.string.route_other
         InternalRoute.UNKNOWN -> R.string.route_unknown
     },

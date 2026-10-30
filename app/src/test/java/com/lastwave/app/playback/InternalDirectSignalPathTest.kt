@@ -162,6 +162,17 @@ class InternalDirectSignalPathTest {
     }
 
     @Test
+    fun androidAutoTrackReportsTheMixerAndTheConversion() {
+        val aa = session(sourceRate = 44_100, deviceRate = 48_000, resampled = true, formatConverted = true, formatLossless = false)
+            .copy(route = InternalRoute.ANDROID_AUTO, backend = InternalBackend.DIRECT_TRACK, directVerified = false, mmap = false)
+        val report = evaluateSignalPath(input(aa))
+        assertThat(report.directToHal).isFalse()
+        assertThat(report.bitPerfect).isFalse()
+        assertThat(report.checks.first { it.labelRes == com.lastwave.app.R.string.signal_label_mixer }.passed)
+            .isFalse()
+    }
+
+    @Test
     fun bluetoothBypassStillReportsTheCodec() {
         val report = evaluateSignalPath(input(trackSession(InternalRoute.BLUETOOTH, verified = true)))
         assertThat(report.internalDirectActive).isTrue()

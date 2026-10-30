@@ -2,7 +2,9 @@
 
 package com.lastwave.app.playback
 
+import android.app.UiModeManager
 import android.content.Context
+import android.content.res.Configuration
 import android.media.AudioAttributes
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
@@ -33,7 +35,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /** Where Android currently sends media audio, as far as this feature cares. */
-enum class InternalRoute { SPEAKER, WIRED, BLUETOOTH, USB, OTHER, UNKNOWN }
+enum class InternalRoute { SPEAKER, WIRED, BLUETOOTH, USB, ANDROID_AUTO, OTHER, UNKNOWN }
 
 /** How the mixer is bypassed. */
 enum class InternalBackend {
@@ -226,6 +228,10 @@ class InternalDirectOutput @Inject constructor(
 
     /** Current route as Android reports it for media playback. */
     fun currentRoute(): Pair<InternalRoute, String> {
+        // Android Auto captures media into its own stream whatever device Android reports.
+        // shortcut: car mode stands for "projecting", upgrade to androidx.car.app CarConnection if a car launcher enables it.
+        val uiMode = appContext.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
+        if (uiMode?.currentModeType == Configuration.UI_MODE_TYPE_CAR) return InternalRoute.ANDROID_AUTO to "Android Auto"
         val manager = audioManager ?: return InternalRoute.UNKNOWN to ""
         val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             runCatching {
@@ -301,6 +307,15 @@ class InternalDirectOutput @Inject constructor(
         synchronized(openLock) {
             if (reuseLocked(format, srcEnc)) return true
             closeLocked()
+            // Android Auto mixes every app into the one stream it sends the car: nothing
+            // reaches the car unmixed, and MMAP would skip that capture (sound on the phone).
+            if (route == InternalRoute.ANDROID_AUTO) {
+                if (!openProjectionTrackLocked(format, srcEnc, sourceBits, routeName)) {
+                    return fail(InternalDirectReason.MIXED_BY_ANDROID)
+                }
+                lastFailure = null
+                return true.also { scope.launch { refreshAvailability() } }
+            }
             if (DIRECT_TRACK_OK) {
                 when (openDirectTrackLocked(format, srcEnc, sourceBits, route, routeName)) {
                     TrackOutcome.ENGAGED -> {
@@ -409,6 +424,57 @@ class InternalDirectOutput @Inject constructor(
                 "verified=${direct == true}",
         )
         return TrackOutcome.ENGAGED
+    }
+
+    /**
+     * Android Auto: one track at the car stream's rate, so LastWave's soxr does the
+     * only rate conversion and Android Auto's mixer passes it at unity. Never claimed
+     * as a bypass (directVerified = false): the signal path reports the mixer.
+     */
+    private fun openProjectionTrackLocked(
+        format: Format,
+        srcEnc: Int,
+        sourceBits: Int,
+        routeName: String,
+    ): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
+        val resampled = format.sampleRate != PROJECTION_RATE_HZ
+        // Resampled audio arrives as Float32 from soxr; keep it float down to Android Auto.
+        val wire = if (resampled) InternalDirectStream.ENC_FLOAT else DirectTrackStream.wireEncodingFor(srcEnc, sourceBits)
+        val created = DirectTrackStream(MEDIA_ATTRIBUTES)
+        if (!created.open(PROJECTION_RATE_HZ, format.channelCount, wire)) {
+            created.release()
+            return false
+        }
+        track = created
+        activeSourceRateHz = format.sampleRate
+        activeSourceEncoding = srcEnc
+        activeSourceChannels = format.channelCount
+        deviceRateHz = PROJECTION_RATE_HZ
+        deviceEncoding = wire
+        deviceChannels = format.channelCount
+        deviceBufferFrames = 0
+        playing = false
+        rebaseClock()
+        _session.value = InternalDirectSession(
+            route = InternalRoute.ANDROID_AUTO,
+            routeName = routeName,
+            sourceRateHz = format.sampleRate,
+            sourceEncoding = srcEnc,
+            sourceBits = sourceBits,
+            deviceRateHz = PROJECTION_RATE_HZ,
+            deviceEncoding = wire,
+            deviceChannels = format.channelCount,
+            resampled = resampled,
+            formatConverted = resampled || wire != srcEnc,
+            formatLossless = !resampled && isLossless(srcEnc, sourceBits, wire),
+            mmap = false,
+            deviceBufferFrames = 0,
+            backend = InternalBackend.DIRECT_TRACK,
+            directVerified = false,
+        )
+        Log.i(TAG, "INTERNAL DIRECT (android auto) src=${format.sampleRate}Hz -> ${PROJECTION_RATE_HZ}Hz resampled=$resampled")
+        return true
     }
 
     private fun openMmapLocked(
@@ -675,6 +741,8 @@ class InternalDirectOutput @Inject constructor(
         private const val PROBE_DEBOUNCE_MS = 600L
         private const val DRAIN_MARGIN_MS = 15L
         private const val ROUTE_SETTLE_MS = 2_000L
+        // shortcut: the rate head units ask Android Auto for media (48 kHz), not read from the car; upgrade if one reports another.
+        private const val PROJECTION_RATE_HZ = 48_000
 
         private val NATIVE_OK: Boolean get() = InternalDirectStream.nativeLoaded
 

@@ -432,6 +432,7 @@
     <string name="route_wired">Wired</string>
     <string name="route_bluetooth">Bluetooth</string>
     <string name="route_usb">USB</string>
+    <string name="route_android_auto" translatable="false">Android Auto</string>
     <string name="route_other">Other</string>
     <string name="route_unknown">Unknown</string>
     <string name="badge_mode_bit_perfect">Bit-perfect</string>
