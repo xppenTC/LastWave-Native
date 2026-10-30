@@ -246,6 +246,10 @@ fun HomeSectionsScreen(
     var currentPinned by remember(pinned) { mutableStateOf(pinned) }
 
     LaunchedEffect(currentSections, currentHidden, currentPinned) {
+        // Saving what was just read back wrote the empty pre-load values over the stored choices.
+        if (currentSections == initialSections && currentHidden == allHidden && currentPinned == pinned) {
+            return@LaunchedEffect
+        }
         viewModel.saveUniversalHomeSections(
             order = currentSections.map { it.id },
             hidden = currentHidden,

@@ -466,7 +466,7 @@ fun FeedScreen(
                     buildList {
                         if (showSynthetic && isSectionVisible(HomeSection.QUICK_TILES) && quickTiles.isNotEmpty()) add("quick_tiles")
                         if (showSynthetic && podcastsEnabled && state.feedData.podcastShows.isNotEmpty()) add("podcast_shelf")
-                        if (showSynthetic) add("taste_strip")
+                        if (showSynthetic && isSectionVisible(HomeSection.TASTE_STRIP)) add("taste_strip")
                         if (state.isChipActive) {
                             if (state.isChipLoading) {
                                 add("chip_loading_skeleton")
@@ -676,8 +676,8 @@ fun FeedScreen(
                         }
                     }
 
-                    // 3. "Your Sound" Section - ALWAYS visible below Quick Access
-                    if (showSynthetic) {
+                    // 3. "Your Sound" Section - below Quick Access
+                    if (showSynthetic && isSectionVisible(HomeSection.TASTE_STRIP)) {
                         val displayTags = topGenres.ifEmpty {
                             state.feedData.tasteTags.ifEmpty {
                                 listOf("Rock", "Indie", "Pop", "Electronic", "Hip-Hop", "R&B", "Synthwave", "Alternative")
