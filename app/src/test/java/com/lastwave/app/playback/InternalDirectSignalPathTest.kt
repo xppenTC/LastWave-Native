@@ -173,6 +173,20 @@ class InternalDirectSignalPathTest {
     }
 
     @Test
+    fun modePillNamesTheOutput() {
+        val direct = evaluateSignalPath(input(trackSession(InternalRoute.WIRED, verified = true)))
+        assertThat(signalMode(direct)).isEqualTo(SignalMode.DIRECT)
+        assertThat(signalMode(direct.copy(parametricEqActive = true))).isEqualTo(SignalMode.DIRECT_EQ)
+        val mixer = evaluateSignalPath(input(trackSession(InternalRoute.WIRED, verified = false)))
+        assertThat(signalMode(mixer)).isEqualTo(SignalMode.MIXER)
+        assertThat(signalMode(mixer.copy(parametricEqActive = true))).isEqualTo(SignalMode.MIXER_EQ)
+        val aa = evaluateSignalPath(input(trackSession(InternalRoute.ANDROID_AUTO, verified = false)))
+        assertThat(signalMode(aa)).isEqualTo(SignalMode.ANDROID_AUTO)
+        val bt = evaluateSignalPath(input(trackSession(InternalRoute.BLUETOOTH, verified = true)))
+        assertThat(signalMode(bt)).isEqualTo(SignalMode.DIRECT_BLUETOOTH)
+    }
+
+    @Test
     fun bluetoothBypassStillReportsTheCodec() {
         val report = evaluateSignalPath(input(trackSession(InternalRoute.BLUETOOTH, verified = true)))
         assertThat(report.internalDirectActive).isTrue()

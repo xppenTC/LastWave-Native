@@ -46,6 +46,7 @@ import com.lastwave.app.playback.InternalDirectStream
 import com.lastwave.app.playback.InternalRoute
 import com.lastwave.app.playback.SignalPathReport
 import com.lastwave.app.playback.internalFailureDetail
+import com.lastwave.app.playback.signalMode
 import com.lastwave.app.ui.theme.LiquidGlassPreset
 import com.lastwave.app.ui.theme.LocalLiquidGlass
 import com.lastwave.app.ui.theme.LocalLiquidGlassOverlayBackdrop
@@ -499,6 +500,7 @@ fun SignalPathDialog(
 @Composable
 private fun verdictText(report: SignalPathReport): String {
     if (report.bitPerfect) return stringResource(R.string.signal_verdict_ok)
+    if (report.internalSession?.route == InternalRoute.ANDROID_AUTO) return stringResource(R.string.signal_verdict_android_auto)
     if (report.directToHal && report.parametricEqActive) return stringResource(R.string.signal_verdict_direct_eq)
     if (report.directToHal) return stringResource(R.string.signal_verdict_direct_hal)
     val failing = report.checks.firstOrNull { !it.passed } ?: return ""
@@ -521,13 +523,7 @@ private fun VerdictPill(report: SignalPathReport) {
         report.clockFallbackResampled -> Color(0xFFFFB74D)
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
-    val text = when {
-        report.bitPerfect -> stringResource(R.string.signal_bit_perfect)
-        report.directToHal && report.parametricEqActive -> stringResource(R.string.signal_direct_eq)
-        report.directToHal -> stringResource(R.string.signal_direct_hal)
-        report.clockFallbackResampled && !report.internalDirectActive -> stringResource(R.string.signal_resampled_dac)
-        else -> stringResource(R.string.signal_check_path)
-    }
+    val text = stringResource(signalMode(report).labelRes)
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(10.dp))

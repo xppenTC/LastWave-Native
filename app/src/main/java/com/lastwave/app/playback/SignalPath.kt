@@ -651,6 +651,32 @@ private fun finishReport(
     )
 }
 
+/** Output mode shown in the signal path pill, from the report's verdicts. */
+enum class SignalMode(val labelRes: Int) {
+    BIT_PERFECT(R.string.signal_bit_perfect),
+    DIRECT(R.string.signal_mode_direct),
+    DIRECT_EQ(R.string.signal_mode_direct_eq),
+    DIRECT_BLUETOOTH(R.string.signal_mode_direct_bt),
+    ANDROID_AUTO(R.string.signal_mode_android_auto),
+    DAC_RESAMPLED(R.string.signal_resampled_dac),
+    MIXER(R.string.signal_mode_mixer),
+    MIXER_EQ(R.string.signal_mode_mixer_eq),
+}
+
+fun signalMode(report: SignalPathReport): SignalMode {
+    val internal = report.internalSession
+    return when {
+        report.bitPerfect -> SignalMode.BIT_PERFECT
+        internal?.route == InternalRoute.ANDROID_AUTO -> SignalMode.ANDROID_AUTO
+        report.directToHal && report.parametricEqActive -> SignalMode.DIRECT_EQ
+        report.directToHal -> SignalMode.DIRECT
+        internal?.route == InternalRoute.BLUETOOTH && internal.directVerified -> SignalMode.DIRECT_BLUETOOTH
+        report.clockFallbackResampled && !report.internalDirectActive -> SignalMode.DAC_RESAMPLED
+        report.parametricEqActive -> SignalMode.MIXER_EQ
+        else -> SignalMode.MIXER
+    }
+}
+
 /** One sentence per refusal reason, shown as the "Internal direct output" row. */
 fun internalFailureDetail(reason: InternalDirectReason): Int = when (reason) {
     InternalDirectReason.BLUETOOTH -> R.string.internal_reason_bluetooth

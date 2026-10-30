@@ -224,6 +224,13 @@
     <string name="signal_grant_usb">Autoriser l\'accès USB</string>
     <string name="signal_bit_perfect">BIT-PERFECT</string>
     <string name="signal_check_path">VÉRIFIER LE CHEMIN</string>
+    <string name="signal_mode_direct">DIRECT</string>
+    <string name="signal_mode_direct_eq">DIRECT + AUTOEQ</string>
+    <string name="signal_mode_direct_bt">DIRECT → BLUETOOTH</string>
+    <string name="signal_mode_android_auto">ANDROID AUTO</string>
+    <string name="signal_mode_mixer">MIXEUR</string>
+    <string name="signal_mode_mixer_eq">MIXEUR + AUTOEQ</string>
+    <string name="signal_verdict_android_auto">Android Auto mélange toutes les apps dans le flux qu\'il envoie à la voiture. LastWave convertit lui-même à la fréquence de ce flux.</string>
     <string name="signal_shared_track">AudioTrack partagé</string>
     <string name="signal_verdict_ok">Chemin bit-perfect vérifié — PCM intact jusqu\'au DAC</string>
     <string name="signal_label_source">Source</string>
