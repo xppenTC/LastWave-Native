@@ -7,6 +7,8 @@ import android.support.v4.media.MediaDescriptionCompat
 import com.lastwave.app.data.local.db.DownloadedTrackDao
 import com.lastwave.app.data.local.db.DownloadedTrackEntity
 import com.lastwave.app.data.playlist.PlaylistRepository
+import com.lastwave.app.data.podcast.PodcastRepository
+import com.lastwave.app.data.podcast.toPlayableTrack
 import com.lastwave.app.data.playlist.SavedPlaylist
 import com.lastwave.app.data.playlist.isYouTubeOnly
 import com.lastwave.app.data.search.SearchRepository
@@ -30,6 +32,7 @@ class AndroidAutoMediaLibrary @Inject constructor(
     private val ytMusicLibraryManager: YtMusicLibraryManager,
     private val downloadedTrackDao: DownloadedTrackDao,
     private val searchRepository: SearchRepository,
+    private val podcastRepository: PodcastRepository,
 ) {
     private val nextSearchToken = AtomicLong()
     private val searchQueues = object : LinkedHashMap<String, List<PlayableTrack>>(8, 0.75f, true) {
@@ -75,6 +78,23 @@ class AndroidAutoMediaLibrary @Inject constructor(
                 }
             }
             parentId == DOWNLOADS_ID -> downloadedTrackDao.getAllList().map(::downloadItem)
+            parentId == PODCASTS_ID -> podcastRepository.home()
+                .flatMap { it.shows }
+                .distinctBy { it.showId }
+                .map { show ->
+                    browsableItem(
+                        mediaId = "$PODCAST_SHOW_PREFIX${show.showId}",
+                        title = show.title,
+                        subtitle = show.publisher.orEmpty(),
+                        iconUri = show.artworkUrl,
+                    )
+                }
+            parentId.startsWith(PODCAST_SHOW_PREFIX) -> {
+                val showId = parentId.removePrefix(PODCAST_SHOW_PREFIX)
+                podcastRepository.show(showId)?.episodes.orEmpty().mapIndexed { index, episode ->
+                    playableItem("$PODCAST_EPISODE_PREFIX$index:$showId", episode.toPlayableTrack())
+                }
+            }
             else -> emptyList()
         }
 
@@ -137,6 +157,10 @@ class AndroidAutoMediaLibrary @Inject constructor(
             track?.let { player.play(it, "Downloads"); true } ?: false
         }
         mediaId.startsWith(SEARCH_PREFIX) -> playCachedSearch(mediaId, player)
+        mediaId.startsWith(PODCAST_EPISODE_PREFIX) -> {
+            val parts = mediaId.removePrefix(PODCAST_EPISODE_PREFIX).split(':', limit = 2)
+            playPodcastEpisode(parts.getOrNull(1), parts.getOrNull(0)?.toIntOrNull(), player)
+        }
         else -> false
     }
 
@@ -181,7 +205,7 @@ class AndroidAutoMediaLibrary @Inject constructor(
         return runCatching { ytMusicLibraryManager.loadDetail(playlistId) }.getOrNull() ?: local
     }
 
-    private fun rootItems(state: MusicPlayerState): List<MediaBrowserCompat.MediaItem> = listOf(
+    private suspend fun rootItems(state: MusicPlayerState): List<MediaBrowserCompat.MediaItem> = listOfNotNull(
         browsableItem(
             mediaId = QUEUE_ID,
             title = "Up next",
@@ -199,6 +223,13 @@ class AndroidAutoMediaLibrary @Inject constructor(
             subtitle = "Music available offline",
             playable = true,
         ),
+        if (podcastRepository.isEnabledNow()) {
+            browsableItem(
+                mediaId = PODCASTS_ID,
+                title = "Podcasts",
+                subtitle = "Shows from YouTube Music",
+            )
+        } else null,
     )
 
     private suspend fun playPlaylist(id: Long?, index: Int?, player: MusicPlayer): Boolean {
@@ -209,6 +240,19 @@ class AndroidAutoMediaLibrary @Inject constructor(
             tracks = tracks,
             startIndex = index?.coerceIn(tracks.indices) ?: 0,
             sourceLabel = playlist.title,
+        )
+        return true
+    }
+
+    /** Plays the episode and keeps the rest of the show as the queue, resuming where it was left. */
+    private suspend fun playPodcastEpisode(showId: String?, index: Int?, player: MusicPlayer): Boolean {
+        val page = showId?.let { podcastRepository.show(it) } ?: return false
+        val episode = index?.let { page.episodes.getOrNull(it) } ?: return false
+        player.playPodcastQueue(
+            tracks = page.episodes.map { it.toPlayableTrack() },
+            startIndex = index,
+            startPositionMs = podcastRepository.resumePositionMs(episode),
+            sourceLabel = page.show.title,
         )
         return true
     }
@@ -254,7 +298,7 @@ class AndroidAutoMediaLibrary @Inject constructor(
         playableItem("$QUEUE_TRACK_PREFIX$index", track)
 
     private fun downloadItem(track: DownloadedTrackEntity) =
-        playableItem("$DOWNLOAD_PREFIX${track.id}", track.toPlayableTrack())
+        playableItem("$DOWNLOAD_PREFIX${track.id}", track.toPlayableTrack(), downloaded = true)
 
     private fun DownloadedTrackEntity.toPlayableTrack() = PlayableTrack(
         title = title,
@@ -286,13 +330,22 @@ class AndroidAutoMediaLibrary @Inject constructor(
         )
     }
 
-    private fun playableItem(mediaId: String, track: PlayableTrack) = MediaBrowserCompat.MediaItem(
+    private fun playableItem(mediaId: String, track: PlayableTrack, downloaded: Boolean = false) = MediaBrowserCompat.MediaItem(
         MediaDescriptionCompat.Builder()
             .setMediaId(mediaId)
             .setTitle(track.title)
             .setSubtitle(track.artist)
             .setDescription(track.album)
             .setIconUri(track.coverUri()?.toSafeUri())
+            // Android Auto draws its "downloaded" badge next to the item.
+            .apply {
+                if (downloaded) setExtras(android.os.Bundle().apply {
+                    putLong(
+                        MediaDescriptionCompat.EXTRA_DOWNLOAD_STATUS,
+                        MediaDescriptionCompat.STATUS_DOWNLOADED,
+                    )
+                })
+            }
             .build(),
         MediaBrowserCompat.MediaItem.FLAG_PLAYABLE,
     )
@@ -329,6 +382,9 @@ class AndroidAutoMediaLibrary @Inject constructor(
         const val QUEUE_ID = "category:queue"
         const val PLAYLISTS_ID = "category:playlists"
         const val DOWNLOADS_ID = "category:downloads"
+        const val PODCASTS_ID = "category:podcasts"
+        private const val PODCAST_SHOW_PREFIX = "podcast-show:"
+        private const val PODCAST_EPISODE_PREFIX = "podcast-episode:"
         private const val QUEUE_TRACK_PREFIX = "queue:"
         private const val PLAYLIST_PREFIX = "playlist:"
         private const val PLAYLIST_TRACK_PREFIX = "playlist-track:"

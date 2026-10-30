@@ -104,6 +104,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
     @Inject lateinit var artworkRepository: com.lastwave.app.data.artwork.ArtworkRepository
     @Inject lateinit var androidAutoLibrary: AndroidAutoMediaLibrary
     @Inject lateinit var trackLikeController: TrackLikeController
+    @Inject lateinit var lyricsRepository: com.lastwave.app.data.lyrics.LyricsRepository
     @Inject lateinit var liveTelemetryRepository: com.lastwave.app.data.repository.LiveTelemetryRepository
     @Inject lateinit var jamPlaybackSync: com.lastwave.app.playback.jam.JamPlaybackSync
 
@@ -152,6 +153,11 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
     private var notificationSignature = ""
     private var widgetSignature = ""
     private var systemStateSignature = ""
+    private val carPrefs by lazy { getSharedPreferences("android_auto", MODE_PRIVATE) }
+    private var carLyricsOn = false
+    private var carLyricsKey: String? = null
+    private var carLyricsLines: List<com.lastwave.app.data.lyrics.LyricLine> = emptyList()
+    private var carLyricsJob: Job? = null
     private var legacyBroadcastSignature = ""
     private var sessionQueueSignature = ""
     private var carBrowseQueueSignature = ""
@@ -231,6 +237,14 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                                 setOriginOsLoopMode(extras?.getInt(OriginOsMusicCard.KEY_LOOP_MODE) ?: 0)
                             ACTION_SHUFFLE -> musicPlayer.toggleShuffle()
                             ACTION_REPEAT -> musicPlayer.cycleRepeatMode()
+                            ACTION_LIKE -> musicPlayer.state.value.current?.let {
+                                setCurrentTrackLiked(!trackLikeController.isLiked(it))
+                            }
+                            ACTION_LYRICS -> {
+                                carLyricsOn = !carLyricsOn
+                                carPrefs.edit().putBoolean(KEY_CAR_LYRICS, carLyricsOn).apply()
+                                publishSystemState(musicPlayer.state.value)
+                            }
                         }
                     }
                     override fun onPlayFromSearch(query: String?, extras: Bundle?) {
@@ -332,6 +346,15 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             // The heart of the metadata follows a like made anywhere in the app.
             trackLikeController.likedTrackKeys.drop(1).collect {
                 publishSystemState(musicPlayer.state.value)
+            }
+        }
+        carLyricsOn = carPrefs.getBoolean(KEY_CAR_LYRICS, false)
+        scope.launch {
+            // The state filter above drops position and quality ticks; the car's lyric line and badge need them.
+            while (true) {
+                delay(CAR_TICK_MS)
+                val state = musicPlayer.state.value
+                if (state.isPlaying && isCarMode()) publishSystemState(state)
             }
         }
         startDetector()
@@ -439,6 +462,38 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
         scope.launch {
             runCatching { trackLikeController.toggle(track) }
                 .onFailure { error -> android.util.Log.w("MusicPlaybackService", "Music card like failed", error) }
+        }
+    }
+
+    // shortcut: car mode stands for "projecting", same as InternalDirectOutput.currentRoute.
+    private fun isCarMode(): Boolean =
+        (getSystemService(UI_MODE_SERVICE) as? android.app.UiModeManager)?.currentModeType ==
+            android.content.res.Configuration.UI_MODE_TYPE_CAR
+
+    /** Loads the synced lines of [track] once; the car tick then shows the line being sung. */
+    private fun loadCarLyrics(track: PlayableTrack, durationMs: Long) {
+        val key = track.videoId ?: "${track.title}|${track.artist}"
+        if (key == carLyricsKey) return
+        carLyricsKey = key
+        carLyricsLines = emptyList()
+        carLyricsJob?.cancel()
+        carLyricsJob = scope.launch {
+            val result = runCatching {
+                lyricsRepository.getLyrics(
+                    title = track.title,
+                    artist = track.artist,
+                    album = track.album,
+                    durationSeconds = (durationMs.takeIf { it > 0 } ?: track.durationMs)?.let { (it / 1000).toInt() },
+                    wordByWord = false,
+                    videoId = track.videoId,
+                    localLrcPath = com.lastwave.app.data.generate.LocalAudioFormats
+                        .importedPathOrNull(track.playbackUrl)
+                        ?.let(com.lastwave.app.data.generate.LocalAudioFormats::lrcPathFor),
+                )
+            }.getOrNull() as? com.lastwave.app.data.lyrics.LyricsResult.Success
+            if (carLyricsKey == key) {
+                carLyricsLines = result?.takeIf { it.isSynced && !it.isInstrumental }?.lines.orEmpty()
+            }
         }
     }
 
@@ -992,6 +1047,16 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
         updateMediaSessionVolumeRouting(state.isCasting, state.appVolume)
         publishSessionQueue(session, state)
         val isLiked = track != null && trackLikeController.isLiked(track)
+        val inCar = isCarMode()
+        if (inCar && carLyricsOn && track != null) loadCarLyrics(track, state.durationMs)
+        // Car only, so phone media controls and Bluetooth keep the plain artist.
+        val carSubtitle = if (inCar && track != null) {
+            carSubtitle(
+                artist = track.artist,
+                badge = qualityBadgeLabel(state),
+                lyric = if (carLyricsOn) lyricLineAt(carLyricsLines, state.positionMs) else null,
+            )
+        } else null
         val signature = buildString {
             append(track?.title).append('|')
             append(track?.artist).append('|')
@@ -1004,7 +1069,10 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             append(state.appVolume).append('|')
             append(artworkUrl).append('|')
             append(artworkBitmap != null).append('|')
-            append(isLiked)
+            append(isLiked).append('|')
+            append(inCar).append('|')
+            append(carLyricsOn).append('|')
+            append(carSubtitle)
             if (!state.isPlaying) append("|pos=").append(state.positionMs)
         }
         if (signature == systemStateSignature) return
@@ -1034,6 +1102,12 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                         OriginOsMusicCard.loopModeOf(state.shuffleEnabled, state.repeatMode).toLong(),
                     )
                     .apply {
+                        if (carSubtitle != null) {
+                            putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, track?.title.orEmpty())
+                            putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, carSubtitle)
+                        }
+                    }
+                    .apply {
                         val rawArt = artworkBitmap
                         val art = if (rawArt != null && (rawArt.width > 512 || rawArt.height > 512)) {
                             val maxDim = maxOf(rawArt.width, rawArt.height).toFloat()
@@ -1060,6 +1134,16 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                             PlaybackStateCompat.ACTION_SET_RATING,
                     )
                     // Android Auto shows only custom actions, never the shuffle/repeat flags above.
+                    // Like and lyrics only in the car, so the phone's media controls keep their buttons.
+                    .apply {
+                        if (inCar && track != null) addCustomAction(
+                            PlaybackStateCompat.CustomAction.Builder(
+                                ACTION_LIKE,
+                                if (isLiked) "Liked" else "Like",
+                                if (isLiked) R.drawable.ic_auto_favorite else R.drawable.ic_auto_favorite_border,
+                            ).build(),
+                        )
+                    }
                     .addCustomAction(
                         PlaybackStateCompat.CustomAction.Builder(
                             ACTION_SHUFFLE,
@@ -1082,6 +1166,15 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                             },
                         ).build(),
                     )
+                    .apply {
+                        if (inCar) addCustomAction(
+                            PlaybackStateCompat.CustomAction.Builder(
+                                ACTION_LYRICS,
+                                if (carLyricsOn) "Lyrics on" else "Lyrics off",
+                                if (carLyricsOn) R.drawable.ic_auto_lyrics else R.drawable.ic_auto_lyrics_off,
+                            ).build(),
+                        )
+                    }
                     .setActiveQueueItemId(state.currentIndex.toLong())
                     .setBufferedPosition(state.bufferedPositionMs)
                     .setState(playbackState, state.positionMs, if (state.isPlaying) state.speed else 0f)
@@ -1698,6 +1791,10 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
         const val ACTION_SHUFFLE = "com.lastwave.app.playback.SHUFFLE"
         const val ACTION_REPEAT = "com.lastwave.app.playback.REPEAT"
         const val ACTION_STOP = "com.lastwave.app.playback.STOP"
+        const val ACTION_LIKE = "com.lastwave.app.playback.LIKE"
+        const val ACTION_LYRICS = "com.lastwave.app.playback.LYRICS"
+        private const val KEY_CAR_LYRICS = "car_lyrics"
+        private const val CAR_TICK_MS = 500L
     }
 }
 
