@@ -117,8 +117,8 @@ data class MiscSettings(
     val systemEffectsMode: Boolean = false,
     /** When true, shows floating button now playing instead of the bottom mini player card (Settings -> Experimental). */
     val buttonNowPlayingEnabled: Boolean = false,
-    /** When true, shows synced music video option in the Now Playing menu (Settings -> Experimental). Off by default. */
-    val musicVideoEnabled: Boolean = false,
+    /** When true, shows synced music video option in the Now Playing menu (Settings -> Experimental). On by default. */
+    val musicVideoEnabled: Boolean = true,
     val wordByWordLyrics: Boolean = true,
     /** Preferred lyrics source (Settings -> Experimental -> Lyrics Provider).
      *  AUTO races all providers (fastest valid word-sync wins); an explicit
@@ -136,9 +136,9 @@ data class MiscSettings(
      *  When false, uses the classic standard progress slider in the player tab. */
     val wavySeekbarEnabled: Boolean = true,
     val rotatingBackgroundEnabled: Boolean = true,
-    /** When true (default), animates fluid rotating artwork in the lyrics background.
-     *  When false, uses static blurred artwork background in the lyrics view. */
-    val lyricsRotatingBackgroundEnabled: Boolean = true,
+    /** When true, animates fluid rotating artwork in the lyrics background.
+     *  When false (default), uses static blurred artwork background in the lyrics view. */
+    val lyricsRotatingBackgroundEnabled: Boolean = false,
     /** When true, keeps the screen from turning off when the user has the lyrics view open. */
     val keepLyricsScreenAwake: Boolean = false,
     /** Seconds of inactivity before the floating lyrics buttons (font size,
@@ -193,6 +193,8 @@ data class MiscSettings(
     val canvasEnabled: Boolean = true,
     /** When true, portrait motion artwork is displayed edge-to-edge behind player controls. */
     val canvasFullBleed: Boolean = true,
+    /** When true, canvas video loops melt into ambient background gradients with a bottom fade. */
+    val canvasGradientBlurEnabled: Boolean = false,
     /** When true, canvas video loops may be fetched over cellular data. */
     val canvasOverCellular: Boolean = true,
     /** When true, anonymous listening telemetry connects to the LastWave Live Global Map. */
@@ -304,6 +306,7 @@ class SettingsPreferences @Inject constructor(
         val LYRICS_PROVIDER = stringPreferencesKey("lw_lyrics_provider")
         val LYRICS_OFFSET_MS = longPreferencesKey("lw_lyrics_offset_ms")
         val LYRICS_FONT_SCALE = floatPreferencesKey("lw_lyrics_font_scale")
+        val APP_VOLUME = floatPreferencesKey("lw_app_volume")
         val CROSSFADE_ENABLED = booleanPreferencesKey("lw_crossfade_enabled")
         val CROSSFADE_SECONDS = intPreferencesKey("lw_crossfade_seconds")
         val WAVY_SEEKBAR_ENABLED = booleanPreferencesKey("lw_wavy_seekbar_enabled")
@@ -336,6 +339,7 @@ class SettingsPreferences @Inject constructor(
         val HTTP_ADDONS_JSON = stringPreferencesKey("lw_http_addons_json")
         val CANVAS_ENABLED = booleanPreferencesKey("lw_canvas_enabled")
         val CANVAS_FULL_BLEED = booleanPreferencesKey("lw_canvas_full_bleed")
+        val CANVAS_GRADIENT_BLUR_ENABLED = booleanPreferencesKey("lw_canvas_gradient_blur_enabled")
         val CANVAS_OVER_CELLULAR = booleanPreferencesKey("lw_canvas_over_cellular")
         val LIVE_TELEMETRY_ENABLED = booleanPreferencesKey("lw_live_telemetry_enabled")
         val LIKED_SONGS_YOUTUBE_SYNC = booleanPreferencesKey("lw_liked_songs_youtube_sync")
@@ -388,7 +392,7 @@ class SettingsPreferences @Inject constructor(
                 downloadQuality = p.readSafely(Keys.DOWNLOAD_QUALITY)?.takeIf { it in DOWNLOAD_QUALITIES } ?: 27,
                 systemEffectsMode = p.readSafely(Keys.SYSTEM_EFFECTS_MODE) ?: false,
                 buttonNowPlayingEnabled = p.readSafely(Keys.BUTTON_NOW_PLAYING_ENABLED) ?: false,
-                musicVideoEnabled = p.readSafely(Keys.MUSIC_VIDEO_ENABLED) ?: false,
+                musicVideoEnabled = p.readSafely(Keys.MUSIC_VIDEO_ENABLED) ?: true,
                 isStudioMasterClarityEnabled = p.readSafely(Keys.MUSIC_ENHANCER) ?: true,
                 clarityPreset = p.readSafely(Keys.CLARITY_PRESET)?.takeIf { it in 0..3 } ?: 0,
                 clarityAtmosBypass = p.readSafely(Keys.CLARITY_ATMOS_BYPASS) ?: false,
@@ -401,7 +405,7 @@ class SettingsPreferences @Inject constructor(
                 crossfadeSeconds = (p.readSafely(Keys.CROSSFADE_SECONDS) ?: 5).coerceIn(1, 12),
                 wavySeekbarEnabled = p.readSafely(Keys.WAVY_SEEKBAR_ENABLED) ?: true,
                 rotatingBackgroundEnabled = p.readSafely(Keys.ROTATING_BACKGROUND_ENABLED) ?: true,
-                lyricsRotatingBackgroundEnabled = p.readSafely(Keys.LYRICS_ROTATING_BACKGROUND_ENABLED) ?: true,
+                lyricsRotatingBackgroundEnabled = p.readSafely(Keys.LYRICS_ROTATING_BACKGROUND_ENABLED) ?: false,
                 keepLyricsScreenAwake = p.readSafely(Keys.KEEP_LYRICS_SCREEN_AWAKE) ?: false,
                 lyricsButtonsAutoHideSeconds =
                     sanitizeLyricsButtonsAutoHideSeconds(p.readSafely(Keys.LYRICS_BUTTONS_AUTO_HIDE_SECONDS)),
@@ -429,6 +433,7 @@ class SettingsPreferences @Inject constructor(
                 httpAddons = resolvedAddons,
                 canvasEnabled = p.readSafely(Keys.CANVAS_ENABLED) ?: true,
                 canvasFullBleed = p.readSafely(Keys.CANVAS_FULL_BLEED) ?: true,
+                canvasGradientBlurEnabled = p.readSafely(Keys.CANVAS_GRADIENT_BLUR_ENABLED) ?: false,
                 canvasOverCellular = p.readSafely(Keys.CANVAS_OVER_CELLULAR) ?: true,
                 liveTelemetryEnabled = p.readSafely(Keys.LIVE_TELEMETRY_ENABLED) ?: true,
                 likedSongsYouTubeSync = p.readSafely(Keys.LIKED_SONGS_YOUTUBE_SYNC) ?: true,
@@ -678,6 +683,12 @@ class SettingsPreferences @Inject constructor(
         dataStore.edit { it[Keys.LYRICS_OFFSET_MS] = offsetMs.coerceIn(-10000L, 10000L) }
     }
 
+    val appVolume: Flow<Float> = dataStore.data.map { it[Keys.APP_VOLUME] ?: 1.0f }
+
+    suspend fun setAppVolume(volume: Float) {
+        dataStore.edit { it[Keys.APP_VOLUME] = volume.coerceIn(0f, 1f) }
+    }
+
     suspend fun setLyricsFontScale(scale: Float) {
         dataStore.edit { it[Keys.LYRICS_FONT_SCALE] = scale.coerceIn(0.7f, 1.5f) }
     }
@@ -872,6 +883,10 @@ class SettingsPreferences @Inject constructor(
 
     suspend fun setCanvasFullBleed(enabled: Boolean) {
         dataStore.edit { it[Keys.CANVAS_FULL_BLEED] = enabled }
+    }
+
+    suspend fun setCanvasGradientBlurEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.CANVAS_GRADIENT_BLUR_ENABLED] = enabled }
     }
 
     suspend fun setCanvasOverCellular(enabled: Boolean) {

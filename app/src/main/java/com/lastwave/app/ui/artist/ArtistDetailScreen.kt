@@ -744,7 +744,11 @@ fun ArtistDetailScreen(
                                     .fillMaxWidth()
                                     .adaptiveContentWidth(maxWidth = 860.dp),
                             ) {
-                                items(data.albums, key = { it.browseId.ifBlank { it.title } }) { album ->
+                                items(
+                                    data.albums,
+                                    key = { it.browseId.ifBlank { it.title } },
+                                    contentType = { "artist_album" },
+                                ) { album ->
                                     ArtistAlbumCard(
                                         item = album,
                                         onClick = {
@@ -778,7 +782,11 @@ fun ArtistDetailScreen(
                                     .fillMaxWidth()
                                     .adaptiveContentWidth(maxWidth = 860.dp),
                             ) {
-                                items(data.singles, key = { it.browseId.ifBlank { it.title } }) { single ->
+                                items(
+                                    data.singles,
+                                    key = { it.browseId.ifBlank { it.title } },
+                                    contentType = { "artist_single" },
+                                ) { single ->
                                     ArtistAlbumCard(
                                         item = single,
                                         onClick = {
@@ -821,7 +829,11 @@ fun ArtistDetailScreen(
                                     .fillMaxWidth()
                                     .adaptiveContentWidth(maxWidth = 860.dp),
                             ) {
-                                items(individualArtists, key = { it.browseId.ifBlank { it.name } }) { artist ->
+                                items(
+                                    individualArtists,
+                                    key = { it.browseId.ifBlank { it.name } },
+                                    contentType = { "similar_artist" },
+                                ) { artist ->
                                     SimilarArtistCard(
                                         artist = artist,
                                         onClick = {

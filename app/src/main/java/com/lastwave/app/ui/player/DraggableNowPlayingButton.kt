@@ -29,6 +29,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -65,13 +66,12 @@ fun DraggableNowPlayingButton(
     modifier: Modifier = Modifier,
     onExpand: () -> Unit,
 ) {
-    val liveProgress by progressState?.collectAsStateWithLifecycle()
-        ?: remember { mutableStateOf(PlaybackProgressState(0L, 0L)) }
-
-    val progressFraction = remember(liveProgress.positionMs, liveProgress.durationMs) {
-        val dur = liveProgress.durationMs.takeIf { it > 0 } ?: track.durationMs ?: 0L
-        if (dur > 0) (liveProgress.positionMs.toFloat() / dur.toFloat()).coerceIn(0f, 1f)
-        else 0f
+    val progressFractionState = remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(progressState, track.durationMs) {
+        progressState?.collect { s ->
+            val dur = s.durationMs.takeIf { it > 0 } ?: track.durationMs ?: 0L
+            progressFractionState.floatValue = if (dur > 0) (s.positionMs.toFloat() / dur.toFloat()).coerceIn(0f, 1f) else 0f
+        }
     }
 
     AnimatedVisibility(
@@ -101,7 +101,7 @@ fun DraggableNowPlayingButton(
             var dragDistance by remember { mutableFloatStateOf(0f) }
 
             val infiniteTransition = rememberInfiniteTransition(label = "now_playing_btn_pulse")
-            val pulseScale by infiniteTransition.animateFloat(
+            val pulseScale = infiniteTransition.animateFloat(
                 initialValue = 1.0f,
                 targetValue = if (isPlaying) 1.05f else 1.0f,
                 animationSpec = infiniteRepeatable(
@@ -155,8 +155,9 @@ fun DraggableNowPlayingButton(
                     modifier = Modifier
                         .size(buttonSizeDp)
                         .graphicsLayer {
-                            scaleX = if (isDragging) 1.1f else pulseScale
-                            scaleY = if (isDragging) 1.1f else pulseScale
+                            val scale = if (isDragging) 1.1f else pulseScale.value
+                            scaleX = scale
+                            scaleY = scale
                         }
                         .clip(CircleShape)
                         .border(
@@ -176,7 +177,7 @@ fun DraggableNowPlayingButton(
                     ) {
                         // Circular track progress slider around cover art
                         CircularProgressIndicator(
-                            progress = { progressFraction },
+                            progress = { progressFractionState.floatValue },
                             modifier = Modifier
                                 .fillMaxSize()
                                 .padding(2.dp),

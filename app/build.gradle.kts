@@ -61,8 +61,8 @@ android {
         applicationId = "com.lastwave.app.bypass"
         minSdk = (project.findProperty("minSdk") as? String)?.toIntOrNull() ?: 29
         targetSdk = 35
-        versionCode = 26
-        versionName = "4.3.1-bypass"
+        versionCode = 27
+        versionName = "5.0.0-bypass"
 
         (project.findProperty("targetAbis") as? String)?.let { prop ->
             ndk {
@@ -337,6 +337,10 @@ kotlin {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
         optIn.add("androidx.compose.foundation.ExperimentalFoundationApi")
     }
+}
+
+composeCompiler {
+    stabilityConfigurationFiles.add(rootProject.layout.projectDirectory.file("compose_compiler_config.conf"))
 }
 
 configurations.all {

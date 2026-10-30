@@ -65,6 +65,16 @@
     <string name="theme_mode_system">System</string>
     <string name="theme_mode_light">Light</string>
     <string name="theme_mode_dark">Dark</string>
+    <string name="settings_section_app_icon">App Icon</string>
+    <string name="settings_app_icon_sub">Choose your home screen &amp; in-app logo</string>
+    <string name="app_icon_default">Default</string>
+    <string name="app_icon_default_sub">Original Electric Lime &amp; Obsidian Teal</string>
+    <string name="app_icon_desktop">Desktop</string>
+    <string name="app_icon_desktop_sub">LastWave Desktop Player edition</string>
+    <string name="app_icon_white">Pure White</string>
+    <string name="app_icon_white_sub">White logo with black strip lines</string>
+    <string name="app_icon_black">Obsidian Black</string>
+    <string name="app_icon_black_sub">Black logo with white strip lines</string>
     <string name="settings_lastwave_theme">LastWave Signature Theme</string>
     <string name="settings_lastwave_theme_sub">Bespoke logo palette • Electric Lime &amp; Obsidian Teal</string>
     <string name="settings_amoled">AMOLED Mode</string>
@@ -120,6 +130,8 @@
     <string name="settings_canvas_enabled_sub">Stream motion artwork loops from Apple Music, Tidal and community</string>
     <string name="settings_canvas_full_bleed">Full Screen Artwork</string>
     <string name="settings_canvas_full_bleed_sub">Full screen edge-to-edge artwork for static and animated tracks</string>
+    <string name="settings_canvas_gradient_blur">Gradient blur on canvas</string>
+    <string name="settings_canvas_gradient_blur_sub">Blend canvas bottom into ambient background gradients</string>
     <string name="settings_canvas_cellular">Canvas Over Cellular</string>
     <string name="settings_canvas_cellular_sub">Download motion artwork over mobile data (cached after first loop)</string>
 
@@ -174,6 +186,8 @@
     <string name="settings_diagnostics_sub">Share logs for troubleshooting</string>
     <string name="settings_check_updates">Check for Updates</string>
     <string name="settings_source_code">Source Code</string>
+    <string name="settings_desktop_app">Download Desktop App</string>
+    <string name="about_made_by">Made by LastWave Team</string>
 
     <!-- Common dialog buttons -->
     <string name="common_cancel">Cancel</string>
@@ -214,7 +228,7 @@
     <string name="home_section_fresh_title">Fresh finds</string>
     <string name="home_section_fresh_sub">New tracks beyond your rotation</string>
     <string name="home_section_jump_title">Jump back in</string>
-    <string name="home_section_jump_sub">Recently played · listen again</string>
+    <string name="home_section_jump_sub">Recently played • listen again</string>
     <string name="home_section_mixes_title">Mixes to explore</string>
     <string name="home_section_mixes_sub">Endless artist radio mixes</string>
     <string name="home_section_spotlight_title">Spotlight</string>
@@ -386,20 +400,20 @@
     <!-- Local songs -->
     <string name="local_add_to_playlist">Add to a playlist</string>
     <string name="local_panel_title">Songs from this device</string>
-    <string name="local_panel_hint">Pick a folder: every MP3, FLAC, WAV, OGG/Opus, M4A/ALAC or AAC file inside it (sub-folders included) is copied into the app with its tags, cover and .lrc lyrics.</string>
+    <string name="local_panel_hint">Pick a folder: every MP3, FLAC, WAV, OGG/Opus, M4A/ALAC or AAC file inside it (sub-folders included) is indexed and played directly from this device without using extra storage.</string>
     <string name="local_no_folder">No folder chosen yet.</string>
-    <string name="local_forget_folder">Forget this folder (copied songs stay)</string>
+    <string name="local_forget_folder">Forget this folder</string>
     <string name="local_choose_folder">Choose a folder</string>
     <string name="local_rescan">Rescan</string>
     <string name="local_scanning">Searching… %1$d files found</string>
-    <string name="local_copying">Copying %1$d/%2$d — %3$s</string>
-    <string name="local_report_space">Not enough free space to copy these songs.</string>
-    <string name="local_report_summary">%1$d added · %2$d updated · %3$d unchanged</string>
+    <string name="local_copying">Indexing %1$d/%2$d — %3$s</string>
+    <string name="local_report_space">Not enough free space.</string>
+    <string name="local_report_summary">%1$d added • %2$d updated • %3$d unchanged</string>
     <plurals name="local_report_unsupported">
         <item quantity="one">%1$d file skipped (unsupported format: %2$s)</item>
         <item quantity="other">%1$d files skipped (unsupported format: %2$s)</item>
     </plurals>
-    <string name="local_report_failed">%1$d file(s) couldn\'t be copied</string>
+    <string name="local_report_failed">%1$d file(s) couldn\'t be indexed</string>
     <string name="local_report_unreachable">%1$d folder(s) no longer reachable — choose them again</string>
     <string name="local_storage_used">Space used by local songs: %1$s</string>
     <!-- Fork: internal direct output (mixer bypass without a USB DAC) -->
@@ -514,6 +528,8 @@
     <string name="menu_timer_minutes">%1$d minutes</string>
     <string name="menu_add_queue">Add to queue</string>
     <string name="menu_open_lastfm">Open in Last.fm</string>
+    <string name="menu_copy_link">Copy link</string>
+    <string name="link_copied">Link copied to clipboard</string>
     <string name="menu_refresh_artwork">Refresh Cover Art</string>
     <string name="menu_copy_song">Copy Song</string>
     <string name="menu_details_specs">Details &amp; Audio Specs</string>
@@ -577,7 +593,7 @@
     <string name="pl_selected_count">%1$d selected</string>
     <string name="pl_select_more_hint">Long press to select more</string>
     <string name="pl_count_only">%1$d Playlists</string>
-    <string name="pl_count_tracks">%1$d Playlists · %2$d Tracks</string>
+    <string name="pl_count_tracks">%1$d Playlists • %2$d Tracks</string>
     <string name="pl_delete_selected_cd">Delete selected</string>
     <string name="pl_clear_selection_cd">Clear selection</string>
     <string name="pl_create_cd">Create custom playlist</string>
@@ -587,7 +603,7 @@
     <string name="pl_pinned_cd">Pinned</string>
     <string name="pl_yt_tracks">%1$d tracks</string>
     <string name="pl_yt_connected">Connected account</string>
-    <string name="pl_subtitle_local">%1$d tracks · %2$s</string>
+    <string name="pl_subtitle_local">%1$d tracks • %2$s</string>
     <string name="pl_play_cd">Play playlist</string>
     <string name="pl_options_cd">Playlist options</string>
     <string name="pl_pin">Pin</string>
@@ -674,13 +690,13 @@
     <string name="feed_albums">Albums for you</string>
     <string name="feed_albums_sub">Real albums from your taste — Last.fm tops + YT Music picks</string>
     <string name="feed_trending">Trending now</string>
-    <string name="feed_trending_sub">Most popular right now · tap a rank to play</string>
+    <string name="feed_trending_sub">Most popular right now • tap a rank to play</string>
     <string name="feed_releases">New releases</string>
     <string name="feed_releases_sub">Fresh drops and new albums</string>
     <string name="feed_friends">Your friends</string>
     <string name="feed_friends_sub">People in your listening circle</string>
     <string name="feed_footer_default">Made for you from your taste</string>
-    <string name="feed_footer_updated">Updated %1$s · Made for you from your taste</string>
+    <string name="feed_footer_updated">Updated %1$s • Made for you from your taste</string>
     <string name="feed_ago_min">%1$dm ago</string>
     <string name="feed_ago_hour">%1$dh ago</string>
     <string name="feed_ago_day">%1$dd ago</string>
@@ -754,6 +770,9 @@
     <!-- Search -->
     <string name="search_cd">Search</string>
     <string name="search_clear_cd">Clear</string>
+    <string name="search_voice_cd">Search by voice</string>
+    <string name="search_voice_prompt">Speak a song, artist, or album to search</string>
+    <string name="search_voice_unavailable">Voice search is not available on this device.</string>
     <string name="search_hint_users">Search Last.fm users…</string>
     <string name="search_hint_yt">Search YouTube Music…</string>
     <string name="search_tab_tracks">Tracks</string>
@@ -777,7 +796,7 @@
     <string name="fpd_opening">Opening playlist…</string>
     <string name="fpd_retry">Try again</string>
     <string name="fpd_loading_more">Loading remaining tracks…</string>
-    <string name="fpd_incomplete">Playlist incomplete · Retry</string>
+    <string name="fpd_incomplete">Playlist incomplete • Retry</string>
     <string name="fpd_track_options_cd">Track options</string>
 
     <!-- Add-to-playlist duplicate dialogs -->
