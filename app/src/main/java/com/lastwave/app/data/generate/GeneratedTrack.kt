@@ -66,6 +66,12 @@ fun GeneratedTrack.sameSongAs(other: GeneratedTrack): Boolean {
         artist.trim().equals(other.artist.trim(), ignoreCase = true)
 }
 
+/** Entries for a liked-keys set: the song key plus its videoId, so a lookup agrees with [sameSongAs]. */
+fun GeneratedTrack.likeKeys(): List<String> = listOfNotNull(key, youtubeVideoIdOrNull()?.let { "yt:$it" })
+
+/** The heart's test: the same song as one in [likedKeys], by title+artist or by video. */
+fun GeneratedTrack.likedIn(likedKeys: Set<String>): Boolean = likeKeys().any { it in likedKeys }
+
 /** Keeps the first occurrence of each song, dropping later duplicates. */
 fun List<GeneratedTrack>.distinctSongs(): List<GeneratedTrack> {
     if (size < 2) return this

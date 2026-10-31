@@ -5,6 +5,7 @@ import android.os.Build
 import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.generate.StoredTrack
 import com.lastwave.app.data.generate.distinctSongs
+import com.lastwave.app.data.generate.likeKeys
 import com.lastwave.app.data.generate.sameSongAs
 import com.lastwave.app.data.generate.toGenerated
 import com.lastwave.app.data.generate.toStored
@@ -302,7 +303,7 @@ class LikedSongsManager @Inject constructor(
         // neither fail the like nor blank the heart state, so keep the last
         // known keys instead.
         if (!isLocalSyncEnabled()) {
-            _likedTrackKeys.value = localOnlyTracks.mapTo(mutableSetOf()) { it.key }
+            _likedTrackKeys.value = localOnlyTracks.flatMapTo(mutableSetOf()) { it.likeKeys() }
             return
         }
         val liked = try {
@@ -315,7 +316,7 @@ class LikedSongsManager @Inject constructor(
         }
         _likedTrackKeys.value = liked
             ?.tracks
-            ?.mapTo(mutableSetOf()) { it.key }
+            ?.flatMapTo(mutableSetOf()) { it.likeKeys() }
             .orEmpty()
     }
 

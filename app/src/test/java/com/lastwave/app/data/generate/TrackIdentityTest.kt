@@ -79,4 +79,17 @@ class TrackIdentityTest {
         val b = GeneratedTrack(name = "A (Official Video)", artist = "X", url = "dQw4w9WgXcQ")
         assertEquals(listOf(a), listOf(a, b).distinctSongs())
     }
+
+    @Test
+    fun heartAgreesWithTheToggle() {
+        // Moved from an imported playlist: the import's spelling, with the video pinned.
+        val liked = GeneratedTrack(name = "BAILANDO", artist = "Unicorn on K", url = "dQw4w9WgXcQ")
+        // The same video playing under YouTube's own title.
+        val playing = GeneratedTrack(name = "Bailando (Official Video)", artist = "Unicorn on K - Topic", url = "dQw4w9WgXcQ")
+        val keys = liked.likeKeys().toSet()
+        assertTrue(playing.sameSongAs(liked))
+        assertTrue(playing.likedIn(keys))
+        assertTrue(GeneratedTrack(name = "bailando", artist = "unicorn on k").likedIn(keys))
+        assertFalse(GeneratedTrack(name = "Other", artist = "Unicorn on K").likedIn(keys))
+    }
 }

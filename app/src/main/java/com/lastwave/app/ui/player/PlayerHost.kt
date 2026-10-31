@@ -255,6 +255,7 @@ import coil.request.ImageRequest
 import coil.request.SuccessResult
 import androidx.media3.common.Player
 import com.lastwave.app.data.generate.GeneratedTrack
+import com.lastwave.app.data.generate.likedIn
 import com.lastwave.app.data.lyrics.LyricsRepository
 import com.lastwave.app.data.lyrics.LyricsResult
 import com.lastwave.app.data.lyrics.LyricsSyncType
@@ -1098,10 +1099,9 @@ private fun ExpandedPlayer(
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val likedTrackKeys by viewModel.likedTrackKeys.collectAsStateWithLifecycle()
     val currentTrack = state.current
-    // Normalized key: raw "title|artist".lowercase() would miss liked entries
-    // whose spacing differs (e.g. trailing space from another source).
+    // Same rule as the toggle (title+artist or video), else the heart shows empty and a tap unlikes.
     val isLiked = currentTrack != null &&
-        currentTrack.toGeneratedTrack().key in likedTrackKeys
+        currentTrack.toGeneratedTrack().likedIn(likedTrackKeys)
     val lyricsOffsetMs by viewModel.liveLyricsOffsetMs.collectAsStateWithLifecycle()
     FullPlayer(
         state = state,

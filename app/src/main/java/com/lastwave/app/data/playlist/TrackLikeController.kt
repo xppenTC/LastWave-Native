@@ -1,5 +1,6 @@
 package com.lastwave.app.data.playlist
 
+import com.lastwave.app.data.generate.likedIn
 import com.lastwave.app.data.local.SettingsPreferences
 import com.lastwave.app.data.ytmusic.YtMusicLibraryManager
 import com.lastwave.app.playback.PlayableTrack
@@ -28,7 +29,7 @@ class TrackLikeController @Inject constructor(
     val likedTrackKeys: StateFlow<Set<String>> get() = likedSongsManager.likedTrackKeys
 
     fun isLiked(track: PlayableTrack, likedKeys: Set<String> = likedTrackKeys.value): Boolean =
-        track.toGeneratedTrack().key in likedKeys
+        track.toGeneratedTrack().likedIn(likedKeys)
 
     /** Throws when Liked Songs could not be updated; the mirrors never do. */
     suspend fun toggle(track: PlayableTrack): LikeChange {
