@@ -3218,7 +3218,12 @@ class InnerTubeMusicApi @Inject constructor(
         if (resolved == null) {
             noteAttempt("fallback=exhausted")
             logResolveAttempts(videoId, failed = true)
-            throw IOException("Unable to resolve a playable audio stream for $videoId")
+            val summary = currentCoroutineContext()[ResolutionAttemptLog]?.summary().orEmpty()
+            // Shown as-is in the player banner, so the cause leads; the tail keeps the dead-id matchers working.
+            val cause = if ("confirm your age" in summary || "AgeRestricted" in summary) {
+                "Age-restricted on YouTube: sign in to your YouTube account to play it. "
+            } else ""
+            throw IOException("${cause}Unable to resolve a playable audio stream for $videoId")
         }
         cacheResolvedStream(resolved, now)
         lastResolvedStreams[resolutionKey(videoId, authScope)] = resolved

@@ -7214,7 +7214,7 @@ class MusicPlayer @Inject constructor(
                 // The stored id itself is unplayable (removed / region-locked).
                 // Rows that pinned it would otherwise fail forever, so fall
                 // back to a fresh search and remember the replacement.
-                return resolveRematchedYoutubeStream(track, deadVideoId = directId)
+                return resolveRematchedYoutubeStream(track, deadVideoId = directId, deadFailure = failure)
             }
             return acceptResolvedIdentity(track, identity, entry, claimPlayback = claimPlayback)
         }
@@ -7253,6 +7253,7 @@ class MusicPlayer @Inject constructor(
     private suspend fun resolveRematchedYoutubeStream(
         track: PlayableTrack,
         deadVideoId: String,
+        deadFailure: Throwable,
     ): ResolvedStream {
         val deadIdentity = TrackIdentity(
             trackId = track.internalTrackId?.takeIf { it.isNotBlank() } ?: deadVideoId,
@@ -7273,7 +7274,8 @@ class MusicPlayer @Inject constructor(
         }
         // Search failed or landed on the same dead video: nothing improved.
         if (matchId == null || matchId == deadVideoId) {
-            throw java.io.IOException("Unable to resolve a playable audio stream for $deadVideoId")
+            // Keep the original message: it may name the cause (age restriction).
+            throw java.io.IOException(deadFailure.message ?: "Unable to resolve a playable audio stream for $deadVideoId", deadFailure)
         }
         val identity = TrackIdentity(matchId, matchId)
         // Re-point the active claim at the replacement so the resolve below
