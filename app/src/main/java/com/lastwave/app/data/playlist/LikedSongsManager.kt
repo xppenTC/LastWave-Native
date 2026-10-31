@@ -97,8 +97,9 @@ class LikedSongsManager @Inject constructor(
                 false
             } else {
                 // Deletion is respected until the next actual Like action.
+                // Newest like on top, the order YouTube's Liked Music and its imports use.
                 val playlist = existing ?: playlistRepository.ensureLikedSongs()
-                playlistRepository.replaceTracksForSync(playlist.id, (playlist.tracks + track).distinctSongs())
+                playlistRepository.replaceTracksForSync(playlist.id, (listOf(track) + playlist.tracks).distinctSongs())
                 refresh()
                 true
             }
@@ -111,7 +112,7 @@ class LikedSongsManager @Inject constructor(
                 refresh()
                 false
             } else {
-                setLocalOnlyTracks((localOnlyTracks + track).distinctSongs())
+                setLocalOnlyTracks((listOf(track) + localOnlyTracks).distinctSongs())
                 refresh()
                 true
             }
@@ -124,12 +125,12 @@ class LikedSongsManager @Inject constructor(
             val existing = playlistRepository.getLikedSongs()
             if (existing?.tracks?.any { it.sameSongAs(track) } == true) return@withLock true
             val playlist = existing ?: playlistRepository.ensureLikedSongs()
-            playlistRepository.replaceTracksForSync(playlist.id, (playlist.tracks + track).distinctSongs())
+            playlistRepository.replaceTracksForSync(playlist.id, (listOf(track) + playlist.tracks).distinctSongs())
             refresh()
             true
         } else {
             if (localOnlyTracks.any { it.sameSongAs(track) }) return@withLock true
-            setLocalOnlyTracks((localOnlyTracks + track).distinctSongs())
+            setLocalOnlyTracks((listOf(track) + localOnlyTracks).distinctSongs())
             refresh()
             true
         }
@@ -275,7 +276,7 @@ class LikedSongsManager @Inject constructor(
                             val playlist = existing ?: playlistRepository.ensureLikedSongs()
                             playlistRepository.replaceTracksForSync(
                                 playlist.id,
-                                (playlist.tracks + pending).distinctSongs(),
+                                (pending + playlist.tracks).distinctSongs(),
                             )
                             setLocalOnlyTracks(emptyList())
                             refresh()
