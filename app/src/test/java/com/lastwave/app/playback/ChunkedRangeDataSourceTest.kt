@@ -65,6 +65,30 @@ class ChunkedRangeDataSourceTest {
         source.close()
     }
 
+    @Test fun chunkMultipleOfFileSizeEndsCleanly() {
+        val upstream = MultiChunkUpstream(8)
+        val source = ChunkedRangeDataSource(upstream, chunkSize = 4)
+        source.open(DataSpec.Builder().setUri("https://media.googlevideo.com/videoplayback").build())
+        val buffer = ByteArray(8)
+        assertEquals(4, source.read(buffer, 0, 8))
+        assertEquals(4, source.read(buffer, 4, 4))
+        assertEquals(C.RESULT_END_OF_INPUT, source.read(buffer, 0, 1))
+        assertEquals((0 until 8).map { it.toByte() }, buffer.toList())
+    }
+
+    @Test fun failedNextChunkIsAnErrorNotTheEndOfFile() {
+        val upstream = MultiChunkUpstream(10, failOpenAt = 4)
+        val source = ChunkedRangeDataSource(upstream, chunkSize = 4)
+        source.open(DataSpec.Builder().setUri("https://media.googlevideo.com/videoplayback").build())
+        assertEquals(4, source.read(ByteArray(4), 0, 4))
+        try {
+            source.read(ByteArray(4), 0, 4)
+            fail("A failed chunk must not look like the end of the file")
+        } catch (expected: IOException) {
+            assertEquals("chunk failed", expected.message)
+        }
+    }
+
     private class FailingUpstream : DataSource {
         var open = false
         var closeCount = 0
@@ -84,7 +108,7 @@ class ChunkedRangeDataSourceTest {
         override fun close() { open = false; closeCount++ }
     }
 
-    private class MultiChunkUpstream(private val totalBytes: Int) : DataSource {
+    private class MultiChunkUpstream(private val totalBytes: Int, private val failOpenAt: Long = -1) : DataSource {
         private var open = false
         private var currentPos = 0L
         private var currentLength = 0L
@@ -100,6 +124,7 @@ class ChunkedRangeDataSourceTest {
                 (totalBytes - currentPos).coerceAtLeast(0L)
             }
             if (currentPos >= totalBytes) throw IOException("EOF")
+            if (currentPos == failOpenAt) throw IOException("chunk failed")
             chunkRemaining = currentLength
             return currentLength
         }
@@ -114,6 +139,8 @@ class ChunkedRangeDataSourceTest {
             return bytesToRead
         }
         override fun getUri(): Uri? = null
+        override fun getResponseHeaders(): Map<String, List<String>> =
+            mapOf("content-range" to listOf("bytes $currentPos-${currentPos + currentLength - 1}/$totalBytes"))
         override fun close() { open = false }
     }
 }
