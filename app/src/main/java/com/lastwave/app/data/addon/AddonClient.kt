@@ -33,6 +33,9 @@ class AddonClient(
 ) {
     val baseUrl: String = normalizeBase(rawBaseUrl)
 
+    /** HTTP status of the last manifest or search answer, shown by the Test button. */
+    @Volatile private var lastStatus: Int? = null
+
     private val json = Json {
         isLenient = true
         ignoreUnknownKeys = true
@@ -76,6 +79,7 @@ class AddonClient(
             signRequest(url, "GET", reqBuilder)
             val req = reqBuilder.build()
             client.newCall(req).execute().use { res ->
+                lastStatus = res.code
                 if (!res.isSuccessful) {
                     return@withContext Result.failure(Exception("Manifest request failed (HTTP ${res.code})"))
                 }
@@ -106,6 +110,7 @@ class AddonClient(
             signRequest(url, "GET", reqBuilder)
             val req = reqBuilder.build()
             client.newCall(req).execute().use { res ->
+                lastStatus = res.code
                 if (!res.isSuccessful) {
                     return@withContext Result.failure(Exception("Search failed (HTTP ${res.code})"))
                 }
@@ -191,17 +196,19 @@ class AddonClient(
         if (baseUrl.isBlank()) return@withContext AddonHealth.Rejected("Addon URL cannot be empty")
         manifest().fold(
             onSuccess = { m ->
-                val info = listOfNotNull(
+                val name = listOfNotNull(
                     m.displayName.takeIf { it.isNotBlank() },
                     m.version.takeIf { it.isNotBlank() }?.let { "v$it" }
                 ).joinToString(" ").ifBlank { null }
+                val info = listOfNotNull(lastStatus?.let { "HTTP $it" }, name).joinToString(" · ").ifBlank { null }
                 AddonHealth.Ok(info)
             },
             onFailure = { err ->
                 if (probeSearch().isSuccess) {
-                    AddonHealth.Ok("Connected (search active)")
+                    AddonHealth.Ok("HTTP $lastStatus · search works, no manifest")
                 } else {
-                    AddonHealth.Unreachable(err.message ?: "Could not connect to addon")
+                    // No status at all means the server never answered (DNS, timeout, TLS).
+                    AddonHealth.Unreachable(err.message ?: err.javaClass.simpleName)
                 }
             }
         )

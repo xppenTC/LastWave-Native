@@ -155,6 +155,13 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
     private var systemStateSignature = ""
     private val carPrefs by lazy { getSharedPreferences("android_auto", MODE_PRIVATE) }
     private var carLyricsOn = false
+    // Android Auto no longer switches the phone to car mode, so ask it directly.
+    @Volatile private var carConnected = false
+    private val carConnection by lazy { androidx.car.app.connection.CarConnection(this) }
+    private val carConnectionObserver = androidx.lifecycle.Observer<Int> { type ->
+        carConnected = type != androidx.car.app.connection.CarConnection.CONNECTION_TYPE_NOT_CONNECTED
+        publishSystemState(musicPlayer.state.value)
+    }
     private var carLyricsKey: String? = null
     private var carLyricsLines: List<com.lastwave.app.data.lyrics.LyricLine> = emptyList()
     private var carLyricsJob: Job? = null
@@ -357,6 +364,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                 if (state.isPlaying && isCarMode()) publishSystemState(state)
             }
         }
+        carConnection.type.observeForever(carConnectionObserver)
         startDetector()
     }
 
@@ -466,7 +474,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
     }
 
     // shortcut: car mode stands for "projecting", same as InternalDirectOutput.currentRoute.
-    private fun isCarMode(): Boolean =
+    private fun isCarMode(): Boolean = carConnected ||
         (getSystemService(UI_MODE_SERVICE) as? android.app.UiModeManager)?.currentModeType ==
             android.content.res.Configuration.UI_MODE_TYPE_CAR
 
@@ -750,6 +758,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
     }
 
     override fun onDestroy() {
+        carConnection.type.removeObserver(carConnectionObserver)
         runCatching { if (playbackWakeLock?.isHeld == true) playbackWakeLock?.release() }
         runCatching { if (playbackWifiLock?.isHeld == true) playbackWifiLock?.release() }
         // The service is the last thing standing in a playback-only session, so

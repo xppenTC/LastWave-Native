@@ -289,6 +289,8 @@ dependencies {
     // Native in-app audio playback, background service, system media
     // controls, Bluetooth/headset controls and a MediaController-backed UI.
     implementation("androidx.media3:media3-exoplayer:1.2.1")
+    // CarConnection: is the phone projecting to Android Auto (car mode no longer says so).
+    implementation("androidx.car.app:app:1.7.0")
     implementation("androidx.media3:media3-datasource-okhttp:1.2.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.2.1")
     // Segmented provider-module path: DASH chunk source + CDM decryption.

@@ -58,6 +58,11 @@ class ModulesViewModel @Inject constructor(
     val addonHealth: StateFlow<com.lastwave.app.data.addon.AddonHealth?> = _addonHealth.asStateFlow()
 
     private val _addonHealthMap = MutableStateFlow<Map<String, com.lastwave.app.data.addon.AddonHealth>>(emptyMap())
+
+    /** Result of the add/edit dialog's Test, for the URL typed there (nothing is saved). */
+    private val _draftHealth = MutableStateFlow<com.lastwave.app.data.addon.AddonHealth?>(null)
+    val draftHealth: StateFlow<com.lastwave.app.data.addon.AddonHealth?> = _draftHealth.asStateFlow()
+    private var draftJob: kotlinx.coroutines.Job? = null
     val addonHealthMap: StateFlow<Map<String, com.lastwave.app.data.addon.AddonHealth>> = _addonHealthMap.asStateFlow()
 
     fun setPreferModules(enabled: Boolean) {
@@ -162,6 +167,26 @@ class ModulesViewModel @Inject constructor(
         }
     }
 
+    fun testDraft(rawUrl: String) {
+        val url = com.lastwave.app.data.addon.AddonClient.normalizeBase(rawUrl)
+        if (url.isBlank()) return
+        clearDraftHealth()
+        draftJob = viewModelScope.launch {
+            _busy.value = true
+            try {
+                _draftHealth.value = com.lastwave.app.data.addon.AddonClient(url, nativeSecrets = nativeSecrets).health()
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
+    /** The result describes the URL it ran on, so it goes when that URL changes. */
+    fun clearDraftHealth() {
+        draftJob?.cancel()
+        _draftHealth.value = null
+    }
+
     fun testAddon(id: String) {
         val addon = httpAddons.value.firstOrNull { it.id == id } ?: return
         if (addon.url.isBlank()) return
@@ -172,7 +197,7 @@ class ModulesViewModel @Inject constructor(
                 _addonHealthMap.value = _addonHealthMap.value + (id to health)
                 _addonHealth.value = health
                 _notice.value = when (health) {
-                    is com.lastwave.app.data.addon.AddonHealth.Ok -> "${addon.name}: Active and reachable"
+                    is com.lastwave.app.data.addon.AddonHealth.Ok -> "${addon.name}: ${health.info ?: "Active and reachable"}"
                     is com.lastwave.app.data.addon.AddonHealth.Unreachable -> "${addon.name}: Unreachable (${health.reason})"
                     is com.lastwave.app.data.addon.AddonHealth.Rejected -> "${addon.name}: Rejected (${health.reason})"
                 }

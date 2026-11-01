@@ -50,7 +50,6 @@ import com.lastwave.app.data.plugin.InstalledProviderModule
 
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
@@ -82,6 +81,7 @@ fun ModulesScreen(
     val addonHealthMap by viewModel.addonHealthMap.collectAsStateWithLifecycle()
     val addonSwitchSeconds by viewModel.addonSwitchSeconds.collectAsStateWithLifecycle()
     val directSourceStream by viewModel.directSourceStream.collectAsStateWithLifecycle()
+    val draftHealth by viewModel.draftHealth.collectAsStateWithLifecycle()
 
     var showAddonDialog by remember { mutableStateOf(false) }
     var editingAddonId by remember { mutableStateOf<String?>(null) }
@@ -101,6 +101,10 @@ fun ModulesScreen(
         }
     }
 
+    LaunchedEffect(showAddonDialog) {
+        if (showAddonDialog) viewModel.clearDraftHealth()
+    }
+
     if (showAddonDialog) {
         AlertDialog(
             onDismissRequest = { showAddonDialog = false },
@@ -115,12 +119,23 @@ fun ModulesScreen(
                     Spacer(Modifier.height(12.dp))
                     OutlinedTextField(
                         value = addonInputText,
-                        onValueChange = { addonInputText = it },
+                        onValueChange = {
+                            addonInputText = it
+                            viewModel.clearDraftHealth()
+                        },
                         label = { Text(stringResource(R.string.mod_addon_url)) },
                         placeholder = { Text("https://example.com/a/...") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    draftHealth?.let { health ->
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            health.label(),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (health is AddonHealth.Ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                        )
+                    }
                 }
             },
             confirmButton = {
@@ -137,8 +152,16 @@ fun ModulesScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showAddonDialog = false }) {
-                    Text(stringResource(R.string.common_cancel))
+                Row {
+                    TextButton(
+                        onClick = { viewModel.testDraft(addonInputText) },
+                        enabled = !busy && addonInputText.isNotBlank(),
+                    ) {
+                        Text(if (busy) "Testing…" else "Test")
+                    }
+                    TextButton(onClick = { showAddonDialog = false }) {
+                        Text(stringResource(R.string.common_cancel))
+                    }
                 }
             },
         )
@@ -218,29 +241,24 @@ fun ModulesScreen(
 
                         Spacer(Modifier.height(8.dp))
 
-                        val statusText = when (health) {
-                            is AddonHealth.Ok -> health.info ?: "Connected"
-                            is AddonHealth.Unreachable -> "Unreachable: ${health.reason}"
-                            is AddonHealth.Rejected -> "Rejected: ${health.reason}"
-                            null -> if (addon.enabled) "Enabled" else "Disabled"
-                        }
+                        val statusText = health?.label() ?: if (addon.enabled) "Enabled" else "Disabled"
                         val statusColor = when (health) {
                             is AddonHealth.Ok -> MaterialTheme.colorScheme.primary
                             is AddonHealth.Unreachable, is AddonHealth.Rejected -> MaterialTheme.colorScheme.error
                             null -> MaterialTheme.colorScheme.onSurfaceVariant
                         }
 
+                        // Status on its own line: with the HTTP code it no longer fits beside the buttons.
+                        Text(
+                            statusText,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = statusColor,
+                        )
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                            horizontalArrangement = Arrangement.End,
                         ) {
-                            Text(
-                                statusText,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = statusColor,
-                                modifier = Modifier.weight(1f),
-                            )
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 if (httpAddons.size > 1) {
                                     IconButton(onClick = { viewModel.moveAddon(addon.id, -1) }, enabled = index > 0) {
@@ -250,11 +268,11 @@ fun ModulesScreen(
                                         Icon(Icons.Filled.ArrowDownward, contentDescription = "Move down")
                                     }
                                 }
-                                IconButton(
+                                TextButton(
                                     onClick = { viewModel.testAddon(addon.id) },
                                     enabled = !busy,
                                 ) {
-                                    Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.mod_test_cd))
+                                    Text("Test")
                                 }
                                 IconButton(
                                     onClick = {
@@ -464,4 +482,10 @@ private fun ModuleRow(
             }
         }
     }
+}
+
+private fun AddonHealth.label(): String = when (this) {
+    is AddonHealth.Ok -> info ?: "Connected"
+    is AddonHealth.Unreachable -> "Unreachable: $reason"
+    is AddonHealth.Rejected -> "Rejected: $reason"
 }
