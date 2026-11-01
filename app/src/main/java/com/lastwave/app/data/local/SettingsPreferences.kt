@@ -35,6 +35,9 @@ data class HttpAddonConfig(
     val enabled: Boolean = true,
 )
 
+const val DEFAULT_ADDON_SWITCH_SECONDS = 5
+val ADDON_SWITCH_SECONDS_RANGE = 2..15
+
 
 /** Preferred lyrics source. Apple Music (syllable-synced) is the default:
  *  it is tried first and the app falls through to the rest automatically
@@ -178,6 +181,10 @@ data class MiscSettings(
     val addonEnabled: Boolean = true,
     /** Configured HTTP addons supporting multiple concurrent servers. */
     val httpAddons: List<HttpAddonConfig> = emptyList(),
+    /** Seconds one addon gets to find (or start) a track before the next one in the order is tried. */
+    val addonSwitchSeconds: Int = DEFAULT_ADDON_SWITCH_SECONDS,
+    /** Plays from the addon from the first note: no YouTube start, no quality switch mid-song. */
+    val directSourceStream: Boolean = false,
     /** Ids of Home tab sections the user hid ([HomeSection.id]).
      *  Empty = everything visible. Unknown ids are dropped on read. */
     val hiddenHomeSections: Set<String> = emptySet(),
@@ -338,6 +345,8 @@ class SettingsPreferences @Inject constructor(
         val ADDON_NAME = stringPreferencesKey("lw_addon_name")
         val ADDON_ENABLED = booleanPreferencesKey("lw_addon_enabled")
         val HTTP_ADDONS_JSON = stringPreferencesKey("lw_http_addons_json")
+        val ADDON_SWITCH_SECONDS = intPreferencesKey("lw_addon_switch_seconds")
+        val DIRECT_SOURCE_STREAM = booleanPreferencesKey("lw_direct_source_stream")
         val CANVAS_ENABLED = booleanPreferencesKey("lw_canvas_enabled")
         val CANVAS_FULL_BLEED = booleanPreferencesKey("lw_canvas_full_bleed")
         val CANVAS_GRADIENT_BLUR_ENABLED = booleanPreferencesKey("lw_canvas_gradient_blur_enabled")
@@ -432,6 +441,9 @@ class SettingsPreferences @Inject constructor(
                 addonName = primaryAddon?.name ?: legacyName,
                 addonEnabled = primaryAddon?.enabled ?: legacyEnabled,
                 httpAddons = resolvedAddons,
+                addonSwitchSeconds = (p.readSafely(Keys.ADDON_SWITCH_SECONDS) ?: DEFAULT_ADDON_SWITCH_SECONDS)
+                    .coerceIn(ADDON_SWITCH_SECONDS_RANGE),
+                directSourceStream = p.readSafely(Keys.DIRECT_SOURCE_STREAM) ?: false,
                 canvasEnabled = p.readSafely(Keys.CANVAS_ENABLED) ?: true,
                 canvasFullBleed = p.readSafely(Keys.CANVAS_FULL_BLEED) ?: true,
                 canvasGradientBlurEnabled = p.readSafely(Keys.CANVAS_GRADIENT_BLUR_ENABLED) ?: false,
@@ -463,6 +475,14 @@ class SettingsPreferences @Inject constructor(
     val httpAddons: StateFlow<List<HttpAddonConfig>> = settings
         .map { it.httpAddons }
         .stateIn(CoroutineScope(Dispatchers.IO + SupervisorJob()), SharingStarted.Eagerly, emptyList())
+
+    val addonSwitchSeconds: StateFlow<Int> = settings
+        .map { it.addonSwitchSeconds }
+        .stateIn(CoroutineScope(Dispatchers.IO + SupervisorJob()), SharingStarted.Eagerly, DEFAULT_ADDON_SWITCH_SECONDS)
+
+    val directSourceStream: StateFlow<Boolean> = settings
+        .map { it.directSourceStream }
+        .stateIn(CoroutineScope(Dispatchers.IO + SupervisorJob()), SharingStarted.Eagerly, false)
 
     suspend fun addHttpAddon(url: String, name: String): HttpAddonConfig {
         val trimmedUrl = url.trim()
@@ -516,6 +536,27 @@ class SettingsPreferences @Inject constructor(
             prefs[Keys.HTTP_ADDONS_JSON] = Json.encodeToString(updated)
             syncLegacyAddonKeys(prefs, updated)
         }
+    }
+
+    /** Moves an addon [offset] places in the order they are tried in. */
+    suspend fun moveHttpAddon(id: String, offset: Int) {
+        dataStore.edit { prefs ->
+            val current = getCurrentAddons(prefs)
+            val from = current.indexOfFirst { it.id == id }
+            val to = from + offset
+            if (from < 0 || to !in current.indices) return@edit
+            val updated = current.toMutableList().apply { add(to, removeAt(from)) }
+            prefs[Keys.HTTP_ADDONS_JSON] = Json.encodeToString(updated)
+            syncLegacyAddonKeys(prefs, updated)
+        }
+    }
+
+    suspend fun setAddonSwitchSeconds(seconds: Int) {
+        dataStore.edit { it[Keys.ADDON_SWITCH_SECONDS] = seconds.coerceIn(ADDON_SWITCH_SECONDS_RANGE) }
+    }
+
+    suspend fun setDirectSourceStream(enabled: Boolean) {
+        dataStore.edit { it[Keys.DIRECT_SOURCE_STREAM] = enabled }
     }
 
     private fun getCurrentAddons(prefs: Preferences): List<HttpAddonConfig> {

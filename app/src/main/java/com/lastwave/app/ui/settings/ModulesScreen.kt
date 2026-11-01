@@ -57,6 +57,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.lastwave.app.data.addon.AddonHealth
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material3.Slider
+import com.lastwave.app.data.local.ADDON_SWITCH_SECONDS_RANGE
+import kotlin.math.roundToInt
 
 /**
  * Settings -> Provider Modules & Addons.
@@ -74,6 +80,8 @@ fun ModulesScreen(
     val preferModules by viewModel.preferModules.collectAsStateWithLifecycle()
     val httpAddons by viewModel.httpAddons.collectAsStateWithLifecycle()
     val addonHealthMap by viewModel.addonHealthMap.collectAsStateWithLifecycle()
+    val addonSwitchSeconds by viewModel.addonSwitchSeconds.collectAsStateWithLifecycle()
+    val directSourceStream by viewModel.directSourceStream.collectAsStateWithLifecycle()
 
     var showAddonDialog by remember { mutableStateOf(false) }
     var editingAddonId by remember { mutableStateOf<String?>(null) }
@@ -162,13 +170,13 @@ fun ModulesScreen(
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    "Take requests directly from personal or community Addon services. Multiple enabled addons query concurrently for the best audio stream.",
+                    "Take requests directly from personal or community Addon services. Enabled addons are tried in this order: the first one that has the track plays it.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
 
-            items(httpAddons, key = { it.id }) { addon ->
+            itemsIndexed(httpAddons, key = { _, it -> it.id }) { index, addon ->
                 val health = addonHealthMap[addon.id]
                 Card(
                     shape = RoundedCornerShape(20.dp),
@@ -191,7 +199,7 @@ fun ModulesScreen(
                             Spacer(Modifier.width(14.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(
-                                    addon.name.ifBlank { "HTTP Addon" },
+                                    "${index + 1}. " + addon.name.ifBlank { "HTTP Addon" },
                                     fontWeight = FontWeight.Bold,
                                     style = MaterialTheme.typography.titleMedium,
                                 )
@@ -234,6 +242,14 @@ fun ModulesScreen(
                                 modifier = Modifier.weight(1f),
                             )
                             Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (httpAddons.size > 1) {
+                                    IconButton(onClick = { viewModel.moveAddon(addon.id, -1) }, enabled = index > 0) {
+                                        Icon(Icons.Filled.ArrowUpward, contentDescription = "Move up")
+                                    }
+                                    IconButton(onClick = { viewModel.moveAddon(addon.id, 1) }, enabled = index < httpAddons.lastIndex) {
+                                        Icon(Icons.Filled.ArrowDownward, contentDescription = "Move down")
+                                    }
+                                }
                                 IconButton(
                                     onClick = { viewModel.testAddon(addon.id) },
                                     enabled = !busy,
@@ -286,7 +302,7 @@ fun ModulesScreen(
                                 fontWeight = FontWeight.Bold,
                             )
                             Text(
-                                if (httpAddons.isEmpty()) "Connect to your personal or custom Addon server URL" else "Add another concurrent streaming addon server",
+                                if (httpAddons.isEmpty()) "Connect to your personal or custom Addon server URL" else "Add another addon, tried after the ones above",
                                 style = MaterialTheme.typography.bodySmall,
                             )
                         }
@@ -294,6 +310,51 @@ fun ModulesScreen(
                 }
             }
 
+            if (httpAddons.isNotEmpty()) {
+                item {
+                    Card(
+                        shape = RoundedCornerShape(20.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        ),
+                    ) {
+                        Column(Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Switch to the next source after", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                    Text(
+                                        "How long an addon gets to find a track, or to start it, before the next one is tried",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Text("$addonSwitchSeconds s", style = MaterialTheme.typography.titleMedium)
+                            }
+                            Slider(
+                                value = addonSwitchSeconds.toFloat(),
+                                onValueChange = { viewModel.setAddonSwitchSeconds(it.roundToInt()) },
+                                valueRange = ADDON_SWITCH_SECONDS_RANGE.first.toFloat()..ADDON_SWITCH_SECONDS_RANGE.last.toFloat(),
+                                steps = ADDON_SWITCH_SECONDS_RANGE.last - ADDON_SWITCH_SECONDS_RANGE.first - 1,
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Direct source stream", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                    Text(
+                                        "A track plays from your addon from the first note, with one stream and no quality switch mid-song. YouTube is used only when no addon has it.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Switch(checked = directSourceStream, onCheckedChange = viewModel::setDirectSourceStream)
+                            }
+                        }
+                    }
+                }
+            }
 
             // --- Section 2: Local .lwp Packages ---
             item {

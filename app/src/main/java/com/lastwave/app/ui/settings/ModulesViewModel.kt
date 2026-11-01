@@ -98,16 +98,9 @@ class ModulesViewModel @Inject constructor(
                 val manifestRes = client.manifest()
                 val manifestName = manifestRes.getOrNull()?.displayName ?: "HTTP Addon"
 
-                val current = httpAddons.value
+                // A new addon is always added: replacing the only one made a second addon impossible.
                 val targetId = if (id.isNullOrBlank()) {
-                    val existing = if (current.size == 1) current.first() else null
-                    if (existing != null) {
-                        settingsPreferences.updateHttpAddon(existing.id, trimmed, manifestName)
-                        existing.id
-                    } else {
-                        val added = settingsPreferences.addHttpAddon(trimmed, manifestName)
-                        added.id
-                    }
+                    settingsPreferences.addHttpAddon(trimmed, manifestName).id
                 } else {
                     settingsPreferences.updateHttpAddon(id, trimmed, manifestName)
                     id
@@ -127,6 +120,21 @@ class ModulesViewModel @Inject constructor(
                 _busy.value = false
             }
         }
+    }
+
+    val addonSwitchSeconds: StateFlow<Int> = settingsPreferences.addonSwitchSeconds
+    val directSourceStream: StateFlow<Boolean> = settingsPreferences.directSourceStream
+
+    fun moveAddon(id: String, offset: Int) {
+        viewModelScope.launch { settingsPreferences.moveHttpAddon(id, offset) }
+    }
+
+    fun setAddonSwitchSeconds(seconds: Int) {
+        viewModelScope.launch { settingsPreferences.setAddonSwitchSeconds(seconds) }
+    }
+
+    fun setDirectSourceStream(enabled: Boolean) {
+        viewModelScope.launch { settingsPreferences.setDirectSourceStream(enabled) }
     }
 
     fun removeAddon(id: String) {

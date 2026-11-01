@@ -102,14 +102,15 @@ class LosslessMusicApi @Inject constructor(
 
     @Volatile
     private var cachedCredentials: BackendCredentials? = null
-    @Volatile
-    private var consecutiveFailures = 0
-    @Volatile
-    private var failureCooldownUntilMs = 0L
+    // Per addon: one dead addon must not take the next one in the order down with it.
+    private val addonFailures = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    private val addonCooldownUntilMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    /** Which addon gave which stream URL, so a URL that failed to play skips that addon. */
+    private val urlSources = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     val isConfigured: Boolean
         get() {
-            if (System.currentTimeMillis() < failureCooldownUntilMs) return false
+            if (isCoolingDown) return false
             val addons = settingsPreferences.httpAddons.value
             if (addons.any { it.enabled && it.url.isNotBlank() }) return true
             val addonUrl = settingsPreferences.addonUrl.value
@@ -124,13 +125,25 @@ class LosslessMusicApi @Inject constructor(
      * timeout before falling back to YouTube anyway.
      */
     val isCoolingDown: Boolean
-        get() {
-            val cooling = System.currentTimeMillis() < failureCooldownUntilMs
-            if (!cooling && consecutiveFailures > 0) {
-                consecutiveFailures = 0
-            }
-            return cooling
+        get() = enabledCredentials().let { creds ->
+            creds.isNotEmpty() && creds.all { isAddonCoolingDown(it.baseUrl) }
         }
+
+    private fun isAddonCoolingDown(baseUrl: String): Boolean {
+        val until = addonCooldownUntilMs[baseUrl] ?: return false
+        if (System.currentTimeMillis() < until) return true
+        addonCooldownUntilMs.remove(baseUrl)
+        addonFailures.remove(baseUrl)
+        return false
+    }
+
+    private fun perAddonTimeoutMs(isDownload: Boolean): Long =
+        if (isDownload) 20_000L else settingsPreferences.addonSwitchSeconds.value * 1_000L
+
+    /** Time for every usable addon to get its turn, plus a margin. */
+    fun addonChainBudgetMs(isDownload: Boolean = false): Long =
+        enabledCredentials().count { !isAddonCoolingDown(it.baseUrl) }.coerceAtLeast(1) *
+            perAddonTimeoutMs(isDownload) + 1_000L
 
     companion object {
         // Quality presets
@@ -150,6 +163,8 @@ class LosslessMusicApi @Inject constructor(
 
         /** How long a backed-off backend stays out of the resolve path. */
         private const val FAILURE_COOLDOWN_MS = 30_000L
+
+        private const val MAX_URL_SOURCES = 200
 
         fun getQualityAttemptOrder(preferred: Int): List<Int> {
             // YouTube is strict: no lossless attempt, no upgrade. Empty = caller goes straight to YouTube.
@@ -628,8 +643,8 @@ class LosslessMusicApi @Inject constructor(
 
     fun invalidateCredentialsCache() {
         cachedCredentials = null
-        consecutiveFailures = 0
-        failureCooldownUntilMs = 0L
+        addonFailures.clear()
+        addonCooldownUntilMs.clear()
     }
 
     /**
@@ -639,31 +654,35 @@ class LosslessMusicApi @Inject constructor(
      * (the callers of [isCoolingDown]) instead of walking the module round
      * trips — the difference between a 200ms fallback and a 5s stall.
      */
-    private fun noteBackendFailure() {
-        consecutiveFailures++
-        Log.w(TAG, "noteBackendFailure: consecutiveFailures=$consecutiveFailures threshold=$FAILURE_COOLDOWN_THRESHOLD")
-        if (consecutiveFailures >= FAILURE_COOLDOWN_THRESHOLD) {
-            failureCooldownUntilMs = System.currentTimeMillis() + FAILURE_COOLDOWN_MS
-            Log.w(TAG, "noteBackendFailure: backend cooldown triggered for ${FAILURE_COOLDOWN_MS}ms")
+    private fun noteBackendFailure(baseUrl: String) {
+        val failures = addonFailures.merge(baseUrl, 1, Int::plus) ?: 1
+        Log.w(TAG, "noteBackendFailure: $baseUrl consecutiveFailures=$failures threshold=$FAILURE_COOLDOWN_THRESHOLD")
+        if (failures >= FAILURE_COOLDOWN_THRESHOLD) {
+            addonCooldownUntilMs[baseUrl] = System.currentTimeMillis() + FAILURE_COOLDOWN_MS
+            Log.w(TAG, "noteBackendFailure: $baseUrl cooldown triggered for ${FAILURE_COOLDOWN_MS}ms")
         }
     }
 
     suspend fun getAllEnabledCredentials(): List<BackendCredentials> = withContext(Dispatchers.IO) {
+        enabledCredentials()
+    }
+
+    private fun enabledCredentials(): List<BackendCredentials> {
         val addons = settingsPreferences.httpAddons.value
         val enabled = addons.filter { it.enabled && it.url.isNotBlank() }
         if (enabled.isNotEmpty()) {
-            return@withContext enabled.map {
+            return enabled.map {
                 BackendCredentials(baseUrl = AddonClient.normalizeBase(it.url), apiKey = "addon", isAddon = true)
             }
         }
         val addonUrl = settingsPreferences.addonUrl.value
         val addonEnabled = settingsPreferences.addonEnabled.value
         if (addonEnabled && !addonUrl.isNullOrBlank()) {
-            return@withContext listOf(
+            return listOf(
                 BackendCredentials(baseUrl = AddonClient.normalizeBase(addonUrl), apiKey = "addon", isAddon = true)
             )
         }
-        emptyList()
+        return emptyList()
     }
 
     suspend fun getCredentials(): BackendCredentials? = withContext(Dispatchers.IO) {
@@ -684,7 +703,7 @@ class LosslessMusicApi @Inject constructor(
             return@withContext null
         }
 
-        val budgetMs = timeoutMs ?: if (isDownload) 20_000L else 8_000L
+        val budgetMs = timeoutMs ?: addonChainBudgetMs(isDownload)
         withTimeoutOrNull(budgetMs) {
             resolveStreamInternal(
                 title = title,
@@ -707,107 +726,65 @@ class LosslessMusicApi @Inject constructor(
         excludedUrls: Set<String>,
         isDownload: Boolean,
     ): LosslessAudioStream? {
-        val allCreds = getAllEnabledCredentials()
+        val skipped = excludedUrls.mapNotNullTo(mutableSetOf()) { urlSources[it] }
+        val allCreds = enabledCredentials().filter { it.baseUrl !in skipped && !isAddonCoolingDown(it.baseUrl) }
         if (allCreds.isEmpty()) {
             return null
         }
 
-        if (allCreds.size == 1) {
-            Log.i(TAG, "resolveStream starting for '$title' by '$artist' via addon (preferredQuality=$preferredQuality, isDownload=$isDownload)")
+        // In the user's order: the first addon that has the track plays it. A link that
+        // failed to play skips the addon that gave it, so the next one gets its turn.
+        val perAddonMs = perAddonTimeoutMs(isDownload)
+        Log.i(TAG, "resolveStream for '$title' by '$artist' across ${allCreds.size} addon(s) in order, ${perAddonMs}ms each (preferredQuality=$preferredQuality, isDownload=$isDownload)")
+        for (creds in allCreds) {
+            var answered = false
             val resolved = try {
-                resolveFromAddon(
-                    title = title,
-                    artist = artist,
-                    expectedDurationSeconds = expectedDurationSeconds,
-                    expectedAlbum = expectedAlbum,
-                    preferredQuality = preferredQuality,
-                    addonBaseUrl = allCreds.first().baseUrl,
-                    excludedUrls = excludedUrls,
-                    isDownload = isDownload,
-                )
+                withTimeoutOrNull(perAddonMs) {
+                    resolveFromAddon(
+                        title = title,
+                        artist = artist,
+                        expectedDurationSeconds = expectedDurationSeconds,
+                        expectedAlbum = expectedAlbum,
+                        preferredQuality = preferredQuality,
+                        addonBaseUrl = creds.baseUrl,
+                        excludedUrls = excludedUrls,
+                        isDownload = isDownload,
+                    ).also { answered = true }
+                }
             } catch (c: CancellationException) {
                 throw c
             } catch (e: Throwable) {
-                Log.w(TAG, "resolveFromAddon failed for '$title': ${e.message}")
+                Log.w(TAG, "resolveFromAddon failed for ${creds.baseUrl}: ${e.message}")
+                answered = true
                 null
             }
-            if (resolved != null) return resolved
-
-            // Atmos fallback: if Dolby Atmos was selected but not found on the track,
-            // fall back to stereo hi-res / lossless rather than failing and cooling down the backend.
-            if (preferredQuality == QUALITY_DOLBY_ATMOS) {
-                if (isCoolingDown) return null
-                Log.i(TAG, "resolveStream: Dolby Atmos not found for '$title' by '$artist', falling back to stereo lossless")
-                return resolveStreamInternal(
-                    title = title,
-                    artist = artist,
-                    expectedDurationSeconds = expectedDurationSeconds,
-                    expectedAlbum = expectedAlbum,
-                    preferredQuality = QUALITY_MAX_HI_RES,
-                    excludedUrls = excludedUrls,
-                    isDownload = isDownload,
-                )
+            if (!answered) {
+                Log.w(TAG, "resolveStream: ${creds.baseUrl} gave no answer within ${perAddonMs}ms; trying the next addon")
+                noteBackendFailure(creds.baseUrl)
             }
-
-            return null
-        }
-
-        Log.i(TAG, "resolveStream racing for '$title' by '$artist' across ${allCreds.size} addons concurrently (preferredQuality=$preferredQuality, isDownload=$isDownload)")
-        val candidates = coroutineScope {
-            allCreds.map { creds ->
-                async {
-                    try {
-                        resolveFromAddon(
-                            title = title,
-                            artist = artist,
-                            expectedDurationSeconds = expectedDurationSeconds,
-                            expectedAlbum = expectedAlbum,
-                            preferredQuality = preferredQuality,
-                            addonBaseUrl = creds.baseUrl,
-                            excludedUrls = excludedUrls,
-                            isDownload = isDownload,
-                        )
-                    } catch (c: CancellationException) {
-                        throw c
-                    } catch (e: Throwable) {
-                        Log.w(TAG, "resolveFromAddon failed for ${creds.baseUrl}: ${e.message}")
-                        null
-                    }
-                }
-            }.awaitAll().filterNotNull()
-        }
-        if (candidates.isEmpty()) {
-            // Atmos fallback: if Dolby Atmos was selected but not found across addons,
-            // fall back to stereo hi-res / lossless rather than failing and cooling down the backend.
-            if (preferredQuality == QUALITY_DOLBY_ATMOS) {
-                if (isCoolingDown) return null
-                Log.i(TAG, "resolveStream: Dolby Atmos not found across addons for '$title' by '$artist', falling back to stereo lossless")
-                return resolveStreamInternal(
-                    title = title,
-                    artist = artist,
-                    expectedDurationSeconds = expectedDurationSeconds,
-                    expectedAlbum = expectedAlbum,
-                    preferredQuality = QUALITY_MAX_HI_RES,
-                    excludedUrls = excludedUrls,
-                    isDownload = isDownload,
-                )
+            if (resolved != null) {
+                if (urlSources.size > MAX_URL_SOURCES) urlSources.clear()
+                urlSources[resolved.url] = creds.baseUrl
+                return resolved
             }
-
-            return null
         }
 
-        return candidates.maxByOrNull { stream ->
-            val tierScore = when (stream.formatId) {
-                QUALITY_DOLBY_ATMOS -> 1000
-                QUALITY_MAX_HI_RES -> 800
-                QUALITY_HI_RES_96 -> 700
-                QUALITY_CD_LOSSLESS -> 500
-                QUALITY_MP3_320 -> 300
-                QUALITY_DATA_SAVER -> 100
-                else -> 50
-            }
-            tierScore + (stream.bitDepth * 5) + stream.samplingRate.toInt()
+        // Atmos fallback: if Dolby Atmos was selected but not found on any addon,
+        // fall back to stereo hi-res / lossless rather than failing and cooling down the backend.
+        if (preferredQuality == QUALITY_DOLBY_ATMOS) {
+            if (isCoolingDown) return null
+            Log.i(TAG, "resolveStream: Dolby Atmos not found for '$title' by '$artist', falling back to stereo lossless")
+            return resolveStreamInternal(
+                title = title,
+                artist = artist,
+                expectedDurationSeconds = expectedDurationSeconds,
+                expectedAlbum = expectedAlbum,
+                preferredQuality = QUALITY_MAX_HI_RES,
+                excludedUrls = excludedUrls,
+                isDownload = isDownload,
+            )
         }
+        return null
     }
 
     private fun isNetworkException(error: Throwable): Boolean {
@@ -875,7 +852,7 @@ class LosslessMusicApi @Inject constructor(
                     isNetworkException(searchError)
                 if (isServerError) {
                     Log.w(TAG, "resolveFromAddon: Addon server failed for query '$query' (${searchError.message}); fast-failing query waterfall")
-                    noteBackendFailure()
+                    noteBackendFailure(addonBaseUrl)
                     return null
                 }
                 continue
@@ -987,7 +964,7 @@ class LosslessMusicApi @Inject constructor(
                         isNetworkException(streamError)
                     if (isServerError) {
                         Log.w(TAG, "resolveFromAddon: Addon server stream failed for track '$trackId' (${streamError.message}); fast-failing candidate loop")
-                        noteBackendFailure()
+                        noteBackendFailure(addonBaseUrl)
                         return null
                     }
                     continue
@@ -1089,8 +1066,8 @@ class LosslessMusicApi @Inject constructor(
                 }
 
                 Log.i(TAG, "resolveFromAddon: Acquired stream for track $trackId: formatId=$formatId, bitDepth=${effectiveBitDepth ?: "unknown"}, sampleRate=${effectiveSampleRate}Hz, codec=$streamCodec")
-                consecutiveFailures = 0
-                failureCooldownUntilMs = 0L
+                addonFailures.remove(addonBaseUrl)
+                addonCooldownUntilMs.remove(addonBaseUrl)
 
                 val lowerUrlPath = rawUrl.substringBefore('?').lowercase()
                 val isExplicitDash = rawUrl.startsWith("data:application/dash+xml") ||

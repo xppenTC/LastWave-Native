@@ -1206,7 +1206,9 @@ class MusicPlayer @Inject constructor(
                             // A dead stream must be replaced now: the fast
                             // module walk used to eat the whole throttle
                             // window and land on "Unable to resolve".
-                            losslessBudget = LosslessBudget.Disabled,
+                            // A dead addon link gets the next addon (its own is
+                            // skipped), each bounded by the switch time.
+                            losslessBudget = if (failedLosslessStream) LosslessBudget.Interactive else LosslessBudget.Disabled,
                         )
                         withContext(Dispatchers.Main.immediate) {
                             if (generation != playRequestGeneration.get() ||
@@ -6862,10 +6864,12 @@ class MusicPlayer @Inject constructor(
 
         if (wantLossless) {
             val expectedSec = (track.durationMs?.takeIf { it > 0 })?.div(1_000)?.toInt()
-            val timeoutMs = when (losslessBudget) {
-                LosslessBudget.Interactive -> 5_000L
-                LosslessBudget.Unbounded -> 10_000L
-                LosslessBudget.Disabled -> 0L
+            val timeoutMs = when {
+                // Direct source stream: every addon gets its turn; YouTube only when all miss.
+                misc.directSourceStream -> losslessMusicApi.addonChainBudgetMs()
+                losslessBudget == LosslessBudget.Interactive -> 5_000L
+                losslessBudget == LosslessBudget.Unbounded -> 10_000L
+                else -> 0L
             }
             val deferred = applicationScope.async(Dispatchers.IO) {
                 runCatching {
@@ -6898,6 +6902,11 @@ class MusicPlayer @Inject constructor(
                 "MusicPlayer",
                 "[STARTUP RESOLVE] Lossless startup resolution exceeded ${timeoutMs}ms for '${track.title}', falling back to YouTube while continuing lossless search in background for hot-swap",
             )
+            if (misc.directSourceStream) {
+                // One stream per track: no lossless hot-swap onto the YouTube start.
+                deferred.cancel()
+                activeUpgradeDeferred = null
+            }
         }
 
         PlaybackStartupLog.cacheLookupStart()
@@ -7476,10 +7485,10 @@ class MusicPlayer @Inject constructor(
             val misc = runCatching { settingsPreferences.settings.first() }.getOrDefault(MiscSettings())
             val wantLossless = misc.preferLosslessStreaming &&
                 misc.losslessQuality != LosslessMusicApi.QUALITY_YOUTUBE
-            if (!wantLossless || losslessMusicApi.isCoolingDown) {
+            if (!wantLossless || misc.directSourceStream || losslessMusicApi.isCoolingDown) {
                 android.util.Log.i(
                     "MusicPlayer",
-                    "[STREAM UPGRADE] skipped '${track.title}' prefer=${misc.preferLosslessStreaming} quality=${misc.losslessQuality} cooling=${losslessMusicApi.isCoolingDown}",
+                    "[STREAM UPGRADE] skipped '${track.title}' prefer=${misc.preferLosslessStreaming} quality=${misc.losslessQuality} direct=${misc.directSourceStream} cooling=${losslessMusicApi.isCoolingDown}",
                 )
                 return@launch
             }
