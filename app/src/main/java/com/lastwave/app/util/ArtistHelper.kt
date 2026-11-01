@@ -59,6 +59,9 @@ object ArtistHelper {
             lower.contains("subscrib") ||
             lower.contains("follow") ||
             lower.contains("monthly") ||
+            // YouTube answers in the app's language: "44 k lectures", "1,2 M de vues".
+            lower.contains("lecture") || lower.contains(" vue") ||
+            lower.contains("écoute") || lower.contains("abonné") ||
             lower.contains(" fan") || lower == "fans" || lower.endsWith(" fans") ||
             lower.endsWith(" songs") || lower.endsWith(" song") ||
             lower.endsWith(" tracks") || lower.endsWith(" track")
