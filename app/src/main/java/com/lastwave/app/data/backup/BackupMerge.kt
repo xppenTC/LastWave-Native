@@ -17,8 +17,9 @@ import kotlinx.serialization.json.Json
  * - playlists match by id, except Liked Songs which match by mode;
  * - tracks match by "name|artist" (lowercased), exclusions by trackKey;
  * - an edit beats a delete; without a base everything is kept (union);
- * - track order follows the file, local additions go at the end - except
- *   ones above every shared track, which stay first (a like in Liked Songs).
+ * - track order is ours when the file kept the base's order (a song moved
+ *   or re-liked here stays where we put it); otherwise it follows the file,
+ *   local additions at the end except ones above every shared track.
  *
  * `holds` tells which tracks the local device can keep (the desktop
  * cannot keep the phone's local songs); the phone keeps everything.
@@ -112,6 +113,11 @@ object BackupMerge {
                 belowShared = true
             }
         }
+        val ordered = if (base != null && !reordered(baseTracks, remoteTracks)) {
+            inLocalOrder(result, localTracks, remoteTracks)
+        } else {
+            result
+        }
         fun <T> pick(get: (BackupPlaylistSnapshot) -> T): T =
             if (base != null && get(mine) != get(base)) get(mine) else get(theirs)
         return theirs.copy(
@@ -120,8 +126,36 @@ object BackupMerge {
             isPinned = pick { it.isPinned },
             customCoverUri = pick { it.customCoverUri },
             discoverSignature = pick { it.discoverSignature },
-            tracksJson = json.encodeToString(result),
+            tracksJson = json.encodeToString(ordered),
         )
+    }
+
+    /** True when [theirs] holds the tracks it shares with [base] in another order. */
+    private fun reordered(base: List<StoredTrack>, theirs: List<StoredTrack>): Boolean {
+        val baseKeys = base.map(::trackKey)
+        val theirKeys = theirs.map(::trackKey)
+        val shared = baseKeys.toSet() intersect theirKeys.toSet()
+        return baseKeys.filter { it in shared } != theirKeys.filter { it in shared }
+    }
+
+    /** [merged] in [local]'s order; a track only the file has follows the one before it there. */
+    private fun inLocalOrder(
+        merged: List<StoredTrack>,
+        local: List<StoredTrack>,
+        remote: List<StoredTrack>,
+    ): List<StoredTrack> {
+        val byKey = merged.associateBy(::trackKey)
+        val outKeys = local.map(::trackKey).filter { it in byKey }.distinct().toMutableList()
+        var after = -1
+        for (key in remote.map(::trackKey)) {
+            val at = outKeys.indexOf(key)
+            if (at >= 0) {
+                after = at
+            } else if (key in byKey) {
+                outKeys.add(++after, key)
+            }
+        }
+        return outKeys.map(byKey::getValue)
     }
 
     private fun <T> mergeByKey(

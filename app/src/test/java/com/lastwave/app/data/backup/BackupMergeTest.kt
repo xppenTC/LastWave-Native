@@ -64,6 +64,26 @@ class BackupMergeTest {
     }
 
     @Test
+    fun `a track moved or re-liked here keeps its place when the file kept its order`() {
+        val m = BackupMerge.merge(
+            base = file(listOf(pl(1, listOf(t("a"), t("b"), t("x")), mode = "liked"))),
+            local = file(listOf(pl(1, listOf(t("x"), t("a"), t("b")), mode = "liked"))),
+            remote = file(listOf(pl(1, listOf(t("a"), t("r"), t("b"), t("x")), mode = "liked"))),
+        )
+        assertThat(names(m.playlists.single())).containsExactly("x", "a", "r", "b").inOrder()
+    }
+
+    @Test
+    fun `the file's order wins when both sides reordered`() {
+        val m = BackupMerge.merge(
+            base = file(listOf(pl(1, listOf(t("a"), t("b"), t("c"))))),
+            local = file(listOf(pl(1, listOf(t("c"), t("a"), t("b"))))),
+            remote = file(listOf(pl(1, listOf(t("b"), t("a"), t("c"))))),
+        )
+        assertThat(names(m.playlists.single())).containsExactly("b", "a", "c").inOrder()
+    }
+
+    @Test
     fun `a track removed here and one added there both apply`() {
         val m = BackupMerge.merge(
             base = file(listOf(pl(1, listOf(t("a"), t("b"))))),
