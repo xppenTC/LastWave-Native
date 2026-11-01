@@ -17,7 +17,8 @@ import kotlinx.serialization.json.Json
  * - playlists match by id, except Liked Songs which match by mode;
  * - tracks match by "name|artist" (lowercased), exclusions by trackKey;
  * - an edit beats a delete; without a base everything is kept (union);
- * - track order follows the file, local additions go at the end.
+ * - track order follows the file, local additions go at the end - except
+ *   ones above every shared track, which stay first (a like in Liked Songs).
  *
  * `holds` tells which tracks the local device can keep (the desktop
  * cannot keep the phone's local songs); the phone keeps everything.
@@ -100,9 +101,16 @@ object BackupMerge {
         val removed = baseTracks.filter { holds(it) && trackKey(it) !in localKeys }.map(::trackKey).toSet()
         val result = remoteTracks.filter { trackKey(it) !in removed }.toMutableList()
         val present = result.map(::trackKey).toMutableSet()
+        var front = 0
+        var belowShared = false
         for (track in localTracks) {
             val key = trackKey(track)
-            if (key !in baseKeys && present.add(key)) result += track
+            if (key !in baseKeys && present.add(key)) {
+                // First sync (no base): plain union, file order then ours.
+                if (belowShared || base == null) result += track else result.add(front++, track)
+            } else if (key in present) {
+                belowShared = true
+            }
         }
         fun <T> pick(get: (BackupPlaylistSnapshot) -> T): T =
             if (base != null && get(mine) != get(base)) get(mine) else get(theirs)

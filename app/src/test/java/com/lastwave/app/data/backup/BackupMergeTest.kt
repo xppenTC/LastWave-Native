@@ -54,6 +54,16 @@ class BackupMergeTest {
     }
 
     @Test
+    fun `tracks added above every shared one stay first`() {
+        val m = BackupMerge.merge(
+            base = file(listOf(pl(1, listOf(t("a"), t("b")), mode = "liked"))),
+            local = file(listOf(pl(1, listOf(t("n2"), t("n1"), t("a"), t("b"), t("c")), mode = "liked"))),
+            remote = file(listOf(pl(1, listOf(t("a"), t("b"), t("r")), mode = "liked"))),
+        )
+        assertThat(names(m.playlists.single())).containsExactly("n2", "n1", "a", "b", "r", "c").inOrder()
+    }
+
+    @Test
     fun `a track removed here and one added there both apply`() {
         val m = BackupMerge.merge(
             base = file(listOf(pl(1, listOf(t("a"), t("b"))))),
