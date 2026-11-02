@@ -6,6 +6,7 @@ import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.generate.StoredTrack
 import com.lastwave.app.data.generate.distinctSongs
 import com.lastwave.app.data.generate.likeKeys
+import com.lastwave.app.data.generate.likedIn
 import com.lastwave.app.data.generate.sameSongAs
 import com.lastwave.app.data.generate.toGenerated
 import com.lastwave.app.data.generate.toStored
@@ -25,6 +26,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -83,7 +85,10 @@ class LikedSongsManager @Inject constructor(
         }
     }
 
-    suspend fun toggle(track: GeneratedTrack): Boolean = mutationMutex.withLock {
+    suspend fun toggle(track: GeneratedTrack): Boolean =
+        withHeartFirst(track, liked = !track.likedIn(_likedTrackKeys.value)) { toggleLocked(track) }
+
+    private suspend fun toggleLocked(track: GeneratedTrack): Boolean = mutationMutex.withLock {
         val localSync = isLocalSyncEnabled()
         if (localSync) {
             val existing = playlistRepository.getLikedSongs()
@@ -120,7 +125,10 @@ class LikedSongsManager @Inject constructor(
     }
 
     /** Artwork double-tap is intentionally idempotent: it never unlikes. */
-    suspend fun like(track: GeneratedTrack): Boolean = mutationMutex.withLock {
+    suspend fun like(track: GeneratedTrack): Boolean =
+        withHeartFirst(track, liked = true) { likeLocked(track) }
+
+    private suspend fun likeLocked(track: GeneratedTrack): Boolean = mutationMutex.withLock {
         if (isLocalSyncEnabled()) {
             val existing = playlistRepository.getLikedSongs()
             if (existing?.tracks?.any { it.sameSongAs(track) } == true) return@withLock true
@@ -133,6 +141,22 @@ class LikedSongsManager @Inject constructor(
             setLocalOnlyTracks((listOf(track) + localOnlyTracks).distinctSongs())
             refresh()
             true
+        }
+    }
+
+    /**
+     * Flips the heart before the write, which decodes every playlist and rewrites the
+     * backup file: seconds on a big library, and "app not responding" on the main thread.
+     * The write runs off it; its refresh() then sets the stored truth.
+     */
+    private suspend fun withHeartFirst(track: GeneratedTrack, liked: Boolean, write: suspend () -> Boolean): Boolean {
+        val before = _likedTrackKeys.value
+        _likedTrackKeys.value = if (liked) before + track.likeKeys() else before - track.likeKeys().toSet()
+        return try {
+            withContext(Dispatchers.Default) { write() }
+        } catch (error: Throwable) {
+            _likedTrackKeys.value = before
+            throw error
         }
     }
 
