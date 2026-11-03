@@ -3777,21 +3777,24 @@ class InnerTubeMusicApi @Inject constructor(
                     normalize(cleanArtist).contains(normalize(candidate.artist)) ||
                     normalize(candidate.title).contains(normalize(cleanArtist)))
         }
-        val best = validCandidates.asSequence()
+        val baseBest = validCandidates.asSequence()
             .filter(isCandidateMatch)
             .maxByOrNull { candidate -> matchScore(candidate, title, cleanArtist) }
-            ?: (if (searchTitle != title.trim()) {
-                val fallbackResults = searchSongs(
-                    query = listOf(title.trim(), cleanArtist).filter { it.isNotBlank() }.joinToString(" "),
-                    limit = 30,
-                    prefetchStreams = prefetchStreams,
-                )
-                fallbackResults.filter {
-                    it.videoId.isNotBlank() && it.videoId != excludedVideoId && it.videoId !in excludedVideoIds
-                }.asSequence()
-                    .filter(isCandidateMatch)
-                    .maxByOrNull { candidate -> matchScore(candidate, title, cleanArtist) }
-            } else null)
+        // The base query has no "(Noiseflow & Triple X Remix)": that remix only turns up
+        // searching the full title, and another remix must not stand in for it.
+        val needsFullTitle = baseBest == null ||
+            TextMatch.versionNames(title).any { it !in tokens(baseBest.title) }
+        val fullTitleMatches = if (needsFullTitle && searchTitle != title.trim()) {
+            searchSongs(
+                query = listOf(title.trim(), cleanArtist).filter { it.isNotBlank() }.joinToString(" "),
+                limit = 30,
+                prefetchStreams = prefetchStreams,
+            ).filter {
+                it.videoId.isNotBlank() && it.videoId != excludedVideoId && it.videoId !in excludedVideoIds
+            }.filter(isCandidateMatch)
+        } else emptyList()
+        val best = (fullTitleMatches + listOfNotNull(baseBest))
+            .maxByOrNull { candidate -> matchScore(candidate, title, cleanArtist) }
             ?: throw IOException("No reliable YouTube Music match found for $title by $artist")
         return best.also {
             if (matchCache.size > MAX_MATCH_CACHE_ENTRIES) matchCache.clear()

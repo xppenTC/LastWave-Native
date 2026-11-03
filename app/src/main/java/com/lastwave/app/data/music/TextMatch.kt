@@ -82,6 +82,13 @@ internal object TextMatch {
     private fun hasNonLatinLetter(value: String): Boolean =
         value.any { it.isLetter() && it !in 'a'..'z' && it !in 'A'..'Z' }
 
+    /**
+     * Who made the version: "noiseflow", "triple", "x" in "(Noiseflow & Triple X Remix)".
+     * [baseTitle] drops them, so without this any remix of the song passes for that one.
+     */
+    fun versionNames(title: String): Set<String> =
+        tokens(title) - tokens(title.replace(VERSION_OR_LABEL_CLAUSE, " ")) - VARIANT_WORDS
+
     fun tokens(value: String): Set<String> = normalize(value)
         .split(' ')
         .filter { it.isNotBlank() && it !in MATCH_NOISE_WORDS }
@@ -176,6 +183,7 @@ internal object TextMatch {
         val wantedVariants = tokens(title).intersect(VARIANT_WORDS)
         val unexpectedVariants = tokens(candidate.title).intersect(VARIANT_WORDS) - wantedVariants
         score -= unexpectedVariants.size * 250
+        score -= (versionNames(title) - tokens(candidate.title)).size * 250
         if (wantedArtist.isNotBlank()) {
             val artistContains = candidateArtist.contains(wantedArtist) || wantedArtist.contains(candidateArtist)
             val titleContainsArtist = candidateTitle.contains(wantedArtist)

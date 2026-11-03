@@ -402,6 +402,8 @@ class LosslessMusicApi @Inject constructor(
             "커버", "라이브", "리믹스",
         ) + LANGUAGE_TOKENS
 
+        private val REMIX_MARKS = setOf("remix", "remixes", "rmx", "refix", "flip", "bootleg", "rework", "vip", "edit", "mix")
+
         private val NEUTRAL_SEGMENTS = setOf(
             "albumversion", "originalversion", "originalmix", "singleversion",
             "radioversion", "radioedit", "stereoversion", "monoversion",
@@ -572,6 +574,10 @@ class LosslessMusicApi @Inject constructor(
             val marks = words.filter { it in VERSION_WORDS }
             if (marks.isNotEmpty()) {
                 versions += marks
+                // "(Noiseflow & Triple X Remix)": who remixed is part of the version, or any remix passes.
+                if (marks.any { it in REMIX_MARKS }) {
+                    versions += words.filter { it.length > 2 && it !in NOISE_WORDS && it !in VERSION_WORDS }
+                }
                 return
             }
             context += words.filter { it.length > 2 && it !in NOISE_WORDS }
