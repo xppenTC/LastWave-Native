@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
@@ -115,7 +116,7 @@ class SpotifyPlaylistImporter @Inject constructor(
         val token = spotifyAuthRepository.getPersonalToken()
         val clientToken = spotifyAuthRepository.getClientToken()
         if (!token.isNullOrBlank()) {
-            val apiResult = runCatching { fetchViaPathfinder(id, token, clientToken) }.getOrNull()
+            val apiResult = fetchViaPathfinder(id, token, clientToken)
             if (apiResult != null && apiResult.rows.isNotEmpty()) {
                 return@withContext apiResult
             }
@@ -137,7 +138,7 @@ class SpotifyPlaylistImporter @Inject constructor(
         parseEmbedPage(html)
     }
 
-    private fun fetchViaPathfinder(id: String, token: String, clientToken: String?): ExternalPlaylistResult? {
+    private suspend fun fetchViaPathfinder(id: String, token: String, clientToken: String?): ExternalPlaylistResult? {
         val rows = mutableListOf<ExternalTrackRow>()
         var title = "Spotify Playlist"
         var author: String? = null
@@ -146,25 +147,16 @@ class SpotifyPlaylistImporter @Inject constructor(
         var totalCount = Int.MAX_VALUE
         var pages = 0
 
-        while (offset < totalCount && pages < 10) {
+        while (offset < totalCount && pages < MAX_PAGES) {
             pages++
             val variables = """{"uri":"spotify:playlist:$id","offset":$offset,"limit":100,"enableWatchFeedEntrypoint":false}"""
             val extensions = """{"persistedQuery":{"version":1,"sha256Hash":"$HASH_FETCH_PLAYLIST"}}"""
             val url = "$PATHFINDER_ENDPOINT?operationName=fetchPlaylist&variables=${Uri.encode(variables)}&extensions=${Uri.encode(extensions)}"
 
-            val reqBuilder = Request.Builder()
-                .url(url)
-                .header("Authorization", "Bearer $token")
-                .header("User-Agent", DESKTOP_USER_AGENT)
-                .header("Accept", "application/json")
-            if (!clientToken.isNullOrBlank()) {
-                reqBuilder.header("Client-Token", clientToken)
-            }
-
-            val body = client.newCall(reqBuilder.build()).execute().use { response ->
-                if (!response.isSuccessful) return null
-                response.body?.string().orEmpty()
-            }
+            // A first-page failure falls back to the public embed page; a later one
+            // must not quietly cut the playlist short.
+            val body = pathfinderGet(url, token, clientToken)
+                ?: if (pages == 1) return null else throw stoppedAfter(rows.size, totalCount)
             if (body.isBlank()) break
 
             val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: break
@@ -204,6 +196,7 @@ class SpotifyPlaylistImporter @Inject constructor(
             }
 
             offset += items.size
+            Log.d(TAG, "playlist page $pages: ${rows.size}/$totalCount rows")
         }
 
         if (rows.isEmpty()) return null
@@ -291,24 +284,14 @@ class SpotifyPlaylistImporter @Inject constructor(
         var totalCount = Int.MAX_VALUE
         var pages = 0
 
-        while (offset < totalCount && pages < 20) {
+        while (offset < totalCount && pages < MAX_PAGES) {
             pages++
             val variables = """{"offset":$offset,"limit":50}"""
             val extensions = """{"persistedQuery":{"version":1,"sha256Hash":"$HASH_FETCH_LIBRARY_TRACKS"}}"""
             val url = "$PATHFINDER_ENDPOINT?operationName=fetchLibraryTracks&variables=${Uri.encode(variables)}&extensions=${Uri.encode(extensions)}"
 
-            val reqBuilder = Request.Builder()
-                .url(url)
-                .header("Authorization", "Bearer $token")
-                .header("User-Agent", DESKTOP_USER_AGENT)
-                .header("Accept", "application/json")
-            if (!clientToken.isNullOrBlank()) {
-                reqBuilder.header("Client-Token", clientToken)
-            }
-
-            val body = client.newCall(reqBuilder.build()).execute().use { response ->
-                if (!response.isSuccessful) null else response.body?.string()
-            } ?: break
+            val body = pathfinderGet(url, token, clientToken)
+                ?: if (pages == 1) break else throw stoppedAfter(rows.size, totalCount)
 
             val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: break
             val tracksObj = root["data"]?.jsonObject?.get("me")?.jsonObject
@@ -339,6 +322,7 @@ class SpotifyPlaylistImporter @Inject constructor(
             }
 
             offset += items.size
+            Log.d(TAG, "liked page $pages: ${rows.size}/$totalCount rows")
         }
 
         ExternalPlaylistResult(
@@ -375,7 +359,13 @@ class SpotifyPlaylistImporter @Inject constructor(
             async {
                 limiter.withPermit {
                     try {
-                        innerTube.findBestMatchOrNull(row.title, row.artist, prefetchStreams = false)?.let { match ->
+                        val found = innerTube.findBestMatchOrNull(row.title, row.artist, prefetchStreams = false)
+                        Log.d(
+                            TAG,
+                            if (found == null) "miss: ${row.title} | ${row.artist}"
+                            else "match: ${row.title} | ${row.artist} => ${found.title} | ${found.artist}",
+                        )
+                        found?.let { match ->
                             GeneratedTrack(
                                 name = row.title,
                                 artist = row.artist,
@@ -392,6 +382,7 @@ class SpotifyPlaylistImporter @Inject constructor(
                 }
             }
         }.awaitAll().filterNotNull()
+        Log.i(TAG, "matched ${tracks.size}/${rows.size}")
 
         ExternalImportResult(
             source = ExternalPlaylistSource.SPOTIFY,
@@ -401,6 +392,37 @@ class SpotifyPlaylistImporter @Inject constructor(
             tracks = tracks,
         )
     }
+
+    /** One Pathfinder GET, retried on rate limits and server or network errors; null once it keeps failing. */
+    private suspend fun pathfinderGet(url: String, token: String, clientToken: String?): String? {
+        val request = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer $token")
+            .header("User-Agent", DESKTOP_USER_AGENT)
+            .header("Accept", "application/json")
+            .apply { if (!clientToken.isNullOrBlank()) header("Client-Token", clientToken) }
+            .build()
+        repeat(PAGE_ATTEMPTS) { attempt ->
+            val (code, body, retryAfter) = try {
+                client.newCall(request).execute().use { response ->
+                    Triple(response.code, response.body?.string(), response.header("Retry-After")?.toLongOrNull())
+                }
+            } catch (e: IOException) {
+                Triple(-1, null, null)
+            }
+            if (code in 200..299) return body.orEmpty()
+            if (code in 400..499 && code != 429) {
+                Log.w(TAG, "Pathfinder HTTP $code")
+                return null
+            }
+            Log.w(TAG, "Pathfinder HTTP $code, attempt ${attempt + 1}/$PAGE_ATTEMPTS")
+            if (attempt < PAGE_ATTEMPTS - 1) delay(((retryAfter ?: 0) * 1000).coerceIn(1000L shl attempt, 15_000L))
+        }
+        return null
+    }
+
+    private fun stoppedAfter(read: Int, total: Int) =
+        IOException("Spotify stopped answering after $read of $total tracks. Try again in a moment.")
 
     /** Depth-first walk over the parsed JSON tree, visiting every object once. */
     private fun walk(root: JsonElement, visit: (JsonObject) -> Unit) {
@@ -444,6 +466,10 @@ class SpotifyPlaylistImporter @Inject constructor(
         const val HASH_FETCH_PLAYLIST = "21ea11a6ac75a5f3e01fd365d29c18e0a4a8b7dc09f89bbb5d73910190c6acaf"
         const val HASH_LIBRARY_V3 = "390c78e5b951029bad359785e69b07b536a509c581cbcd0aded5e5067f187455"
         const val HASH_FETCH_LIBRARY_TRACKS = "087278b20b743578a6262c2b0b4bcd20d879c503cc359a2285baf083ef944240"
+
+        /** Safety stop only (20 000 liked songs at 50 a page); the loop ends on totalCount. */
+        const val MAX_PAGES = 400
+        const val PAGE_ATTEMPTS = 4
 
         const val EMBED_BASE = "https://open.spotify.com/embed/playlist/"
         const val SPOTIFY_TRACK_URI = "spotify:track:"
