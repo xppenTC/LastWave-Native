@@ -876,7 +876,7 @@ private fun StartMixCard(onClick: () -> Unit) {
             },
     ) {
         Row(
-            Modifier.padding(horizontal = 18.dp, vertical = 12.dp).fillMaxWidth(),
+            Modifier.padding(horizontal = 18.dp, vertical = 10.dp).fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
@@ -1028,7 +1028,7 @@ private fun QuickActionCard(
         },
     ) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 14.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
@@ -1069,7 +1069,7 @@ private fun MenuActionRow(
         },
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 14.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
@@ -1113,7 +1113,7 @@ private fun MenuInfoRow(
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)

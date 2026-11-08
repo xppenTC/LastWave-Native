@@ -64,6 +64,9 @@ class PlaylistMoveTracksTest {
         routeNavigator = mockk(relaxed = true),
         localMusicLibrary = mockk(relaxed = true),
         likedSongsManager = likedSongsManager,
+        spotifyPlaylistImporter = mockk(relaxed = true),
+        spotifyPreferences = mockk(relaxed = true),
+        settingsPreferences = mockk(relaxed = true),
     )
 
     @Test

@@ -3,13 +3,12 @@ package com.lastwave.app.ui.common
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Icon
@@ -27,8 +26,7 @@ import androidx.compose.ui.unit.dp
 
 /**
  * Material You Expressive Shuffle Button.
- * Features a squircle tonal container, bouncy spring scale press feedback,
- * high-contrast primary tinted icon, and tactile haptic response.
+ * Solid filled container with bouncy spring scale feedback and tactile haptic response.
  */
 @Composable
 fun ExpressiveShuffleButton(
@@ -54,9 +52,8 @@ fun ExpressiveShuffleButton(
             onClick()
         },
         interactionSource = interactionSource,
-        shape = RoundedCornerShape(13.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.85f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f)),
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.primaryContainer,
         modifier = modifier
             .size(38.dp)
             .graphicsLayer {
@@ -71,7 +68,7 @@ fun ExpressiveShuffleButton(
             Icon(
                 imageVector = Icons.Filled.Shuffle,
                 contentDescription = contentDescription,
-                tint = MaterialTheme.colorScheme.primary,
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
                 modifier = Modifier.size(18.dp),
             )
         }

@@ -251,6 +251,38 @@ fun DownloadsScreen(
             }
         }
 
+    // Files saved by another install or build of the app need the user's OK
+    // before Android lets us delete them.
+    var trackAwaitingDeleteConsent by remember { mutableStateOf<DownloadedTrackEntity?>(null) }
+    val deleteConsentLauncher = rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        trackAwaitingDeleteConsent?.let { track ->
+            viewModel.onDeleteConsentResult(track, result.resultCode == android.app.Activity.RESULT_OK)
+        }
+        trackAwaitingDeleteConsent = null
+    }
+    val deleteFailedMessage = stringResource(com.lastwave.app.R.string.dl_delete_failed)
+    LaunchedEffect(viewModel) {
+        viewModel.deleteEvents.collect { event ->
+            when (event) {
+                is DownloadsViewModel.DeleteEvent.NeedsConsent -> {
+                    trackAwaitingDeleteConsent = event.track
+                    runCatching {
+                        deleteConsentLauncher.launch(
+                            androidx.activity.result.IntentSenderRequest.Builder(event.request).build(),
+                        )
+                    }.onFailure {
+                        trackAwaitingDeleteConsent = null
+                        android.widget.Toast.makeText(context, deleteFailedMessage, android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+                DownloadsViewModel.DeleteEvent.Failed ->
+                    android.widget.Toast.makeText(context, deleteFailedMessage, android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     fun navigateTo(subView: DownloadSubView) {
         subViewStack = subViewStack + subView
     }
@@ -320,7 +352,7 @@ fun DownloadsScreen(
                     if (activeDownloads.isNotEmpty()) {
                         FilledTonalButton(
                             onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                 viewModel.cancelAllDownloads()
                             },
                             colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(
@@ -340,7 +372,7 @@ fun DownloadsScreen(
                     Box {
                         IconButton(
                             onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                 showOptionsMenu = true
                             },
                             modifier = Modifier.size(40.dp),
@@ -1357,7 +1389,7 @@ private fun DownloadedSongsList(
                     ) {
                         FilledTonalButton(
                             onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                 onPlayAll(true)
                             },
                             shape = CircleShape,
@@ -1370,7 +1402,7 @@ private fun DownloadedSongsList(
                         }
                         FilledTonalButton(
                             onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                 onPlayAll(false)
                             },
                             shape = CircleShape,
@@ -1399,7 +1431,7 @@ private fun DownloadedSongsList(
                         isPlaying = isPlayingThis,
                         position = groupPositionFor(index, tracks.size),
                         onPlay = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                             onPlayTrack(track)
                         },
                         onPlayNext = { onPlayNext(track) },
@@ -1407,7 +1439,7 @@ private fun DownloadedSongsList(
                         onSelectArtist = { onSelectArtist(track.artist) },
                         onSelectAlbum = { if (track.album.isNotBlank()) onSelectAlbum(track.album, track.artist) },
                         onDelete = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                             onDeleteTrack(track)
                         },
                     )
@@ -1481,7 +1513,7 @@ private fun DownloadedArtistsList(
                     )
                     FilledTonalButton(
                         onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                             onShuffleAll()
                         },
                         shape = CircleShape,
@@ -1545,7 +1577,7 @@ private fun DownloadedArtistsList(
 
                         Surface(
                             onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                 onPlayArtist(artist)
                             },
                             shape = CircleShape,
@@ -1632,7 +1664,7 @@ private fun DownloadedAlbumsList(
                     )
                     FilledTonalButton(
                         onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                             onShuffleAll()
                         },
                         shape = CircleShape,
@@ -1697,7 +1729,7 @@ private fun DownloadedAlbumsList(
 
                         Surface(
                             onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                 onPlayAlbum(album)
                             },
                             shape = CircleShape,
@@ -1827,7 +1859,7 @@ private fun ArtistDetailView(
                     ) {
                         FilledTonalButton(
                             onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                 onPlayAll(true)
                             },
                             shape = CircleShape,
@@ -1838,7 +1870,7 @@ private fun ArtistDetailView(
                         }
                         FilledTonalButton(
                             onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                 onPlayAll(false)
                             },
                             shape = CircleShape,
@@ -1870,7 +1902,7 @@ private fun ArtistDetailView(
                     contentPadding = PaddingValues(horizontal = 2.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    items(albums, key = { it.title }) { album ->
+                    itemsIndexed(albums, key = { index, album -> "${album.artist}_${album.title}_$index" }) { _, album ->
                         Card(
                             shape = RoundedCornerShape(16.dp),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
@@ -1936,7 +1968,7 @@ private fun ArtistDetailView(
                 isPlaying = isPlayingThis,
                 position = groupPositionFor(index, tracks.size),
                 onPlay = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                     onPlayTrack(track)
                 },
                 onPlayNext = { onPlayNext(track) },
@@ -1944,7 +1976,7 @@ private fun ArtistDetailView(
                 onSelectArtist = { onSelectArtist(track.artist) },
                 onSelectAlbum = { if (track.album.isNotBlank()) onSelectAlbum(track.album) },
                 onDelete = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                     onDeleteTrack(track)
                 },
             )
@@ -2042,7 +2074,7 @@ private fun AlbumDetailView(
                     ) {
                         FilledTonalButton(
                             onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                 onPlayAll(true)
                             },
                             shape = CircleShape,
@@ -2053,7 +2085,7 @@ private fun AlbumDetailView(
                         }
                         FilledTonalButton(
                             onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                 onPlayAll(false)
                             },
                             shape = CircleShape,
@@ -2092,7 +2124,7 @@ private fun AlbumDetailView(
                 isPlaying = isPlayingThis,
                 position = groupPositionFor(index, tracks.size),
                 onPlay = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                     onPlayTrack(track)
                 },
                 onPlayNext = { onPlayNext(track) },
@@ -2100,7 +2132,7 @@ private fun AlbumDetailView(
                 onSelectArtist = { onSelectArtist(track.artist) },
                 onSelectAlbum = { if (track.album.isNotBlank()) onSelectAlbum(track.album, track.artist) },
                 onDelete = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                     onDeleteTrack(track)
                 },
             )

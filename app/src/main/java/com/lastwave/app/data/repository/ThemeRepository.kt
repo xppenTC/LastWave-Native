@@ -49,13 +49,14 @@ data class ThemeUiState(
     /** Settings' "Use Application Font" toggle — see ui/theme/Type.kt for
      *  what turning it off falls back to. */
     val useCustomFont: Boolean = true,
-    val useBoldFont: Boolean = false,
     /** Experimental liquid-glass materials (Settings → Experimental). When
      *  true, container roles in [colorScheme] are semi-translucent and the
      *  chrome surfaces get specular glass dressing. */
     val liquidGlass: Boolean = true,
     val md3NavBar: Boolean = false,
     val hideNavTabs: Boolean = false,
+    /** Haptic feedback on taps, buttons, toggles and gestures (Settings toggle). */
+    val uiHaptics: Boolean = true,
     /** True when the "Dynamic Now Playing" artwork override is currently
      *  driving the schemes. LastWaveTheme uses this so S+ system dynamic
      *  (wallpaper) only takes over when no now-playing color is active:
@@ -188,11 +189,6 @@ class ThemeRepository @Inject constructor(
             }
         }
 
-        applicationScope.launch {
-            themePreferences.prefs.map { it.appIcon }.distinctUntilChanged().collect { icon ->
-                AppIconManager.applyIcon(context, icon)
-            }
-        }
     }
 
     /** Wallpaper seed for DYNAMIC mode on pre-S devices (and as the data-layer
@@ -270,10 +266,10 @@ class ThemeRepository @Inject constructor(
             mode = prefs.accentMode,
             accentColorHex = if (isLastWave) "#C9FB00" else prefs.accentColor,
             useCustomFont = misc.useCustomFont,
-            useBoldFont = misc.useBoldFont,
             liquidGlass = isGlass,
             md3NavBar = prefs.md3NavBar,
             hideNavTabs = prefs.hideNavTabs,
+            uiHaptics = prefs.uiHaptics,
             isNowPlayingThemed = nowPlayingActive,
             isLastWaveTheme = isLastWave,
             appIcon = prefs.appIcon,
@@ -290,7 +286,6 @@ class ThemeRepository @Inject constructor(
             mode = AccentMode.MANUAL,
             accentColorHex = "#E03030",
             useCustomFont = true,
-            useBoldFont = false,
             liquidGlass = true,
             md3NavBar = false,
             hideNavTabs = false,
@@ -308,6 +303,12 @@ class ThemeRepository @Inject constructor(
     suspend fun setAppIcon(icon: AppIcon) {
         themePreferences.setAppIcon(icon)
         AppIconManager.applyIcon(context, icon)
+    }
+
+    /** Startup heal: leaves exactly the saved icon's launcher alias enabled. */
+    suspend fun reconcileAppIcon() {
+        val icon = themePreferences.prefs.first().appIcon
+        AppIconManager.reconcile(context, icon)
     }
 
     /** Manual pick always leaves DYNAMIC/MONOCHROME: choosing your own accent
@@ -328,6 +329,7 @@ class ThemeRepository @Inject constructor(
 
     suspend fun setMd3NavBar(enabled: Boolean) = themePreferences.setMd3NavBar(enabled)
     suspend fun setHideNavTabs(enabled: Boolean) = themePreferences.setHideNavTabs(enabled)
+    suspend fun setUiHaptics(enabled: Boolean) = themePreferences.setUiHaptics(enabled)
 
     /** Turning this on used to just flip the DataStore flag and wait for
      *  Home's own poll loop to eventually call updateNowPlayingArtwork() —

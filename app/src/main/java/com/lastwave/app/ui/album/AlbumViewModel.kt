@@ -67,6 +67,8 @@ class AlbumViewModel @Inject constructor(
                 }
                 coroutineContext.ensureActive()
                 _uiState.value = AlbumUiState.Success(data)
+                // "Play" starts track 1; warm the opening tracks while the user looks.
+                musicPlayer.warmLikelyPlays(data.tracks.take(WARM_CANDIDATES))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -113,5 +115,9 @@ class AlbumViewModel @Inject constructor(
     fun toggleFavorite() {
         val data = (_uiState.value as? AlbumUiState.Success)?.data ?: return
         viewModelScope.launch { favoritesRepository.toggle(FavoriteKind.ALBUM, data.toFavorite()) }
+    }
+
+    private companion object {
+        const val WARM_CANDIDATES = 6
     }
 }

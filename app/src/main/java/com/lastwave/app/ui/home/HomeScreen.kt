@@ -295,6 +295,30 @@ fun HomeScreen(
                         if (rows[rowIndex] is HomeRow.Track) nextPlaybackIndex++ else -1
                     }
                 }
+                // Content keys without the row index. Suffixing the index made
+                // every key shift by one whenever a scrobble or now-playing row
+                // landed on top, so the list threw away and rebuilt every
+                // visible row (covers flashed, scroll jumped). Duplicates (the
+                // same track scrobbled twice in a second) get an occurrence
+                // counter instead, which stays stable as rows are prepended.
+                val rowKeys = remember(rows) {
+                    val seen = HashMap<String, Int>(rows.size)
+                    Array(rows.size) { i ->
+                        val base = when (val row = rows[i]) {
+                            is HomeRow.DateHeader -> "date_${row.label}"
+                            is HomeRow.Track -> if (row.track.isNowPlaying) {
+                                "nowplaying_${row.track.key}"
+                            } else {
+                                "track_${row.track.key}_${row.track.timestampMillis}"
+                            }
+                            is HomeRow.Album -> "album_${row.album.artist}_${row.album.name}"
+                            is HomeRow.Artist -> "artist_${row.artist.name}"
+                        }
+                        val n = seen[base] ?: 0
+                        seen[base] = n + 1
+                        if (n == 0) base else "${base}#$n"
+                    }
+                }
                 val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
                 // Long-press (deep press) on a track row opens the mini tray;
                 // the 3-dot button keeps opening the full menu sheet.
@@ -323,19 +347,7 @@ fun HomeScreen(
                     ) {
                         itemsIndexed(
                             rows,
-                            key = { index, row ->
-                                val base = when (row) {
-                                    is HomeRow.DateHeader -> "date_${row.label}"
-                                    is HomeRow.Track -> if (row.track.isNowPlaying) {
-                                        "nowplaying_${row.track.key}"
-                                    } else {
-                                        "track_${row.track.key}_${row.track.timestampMillis}"
-                                    }
-                                    is HomeRow.Album -> "album_${row.album.artist}_${row.album.name}"
-                                    is HomeRow.Artist -> "artist_${row.artist.name}"
-                                }
-                                "${base}_$index"
-                            },
+                            key = { index, _ -> rowKeys.getOrNull(index) ?: index.toString() },
                             contentType = { _, row ->
                                 when (row) {
                                     is HomeRow.DateHeader -> "date"
@@ -354,7 +366,7 @@ fun HomeScreen(
                                         onClick = {
                                             musicPlayer.playQueue(
                                                 tracks = playbackQueue,
-                                                startIndex = playbackIndexByRow[rowIndex],
+                                                startIndex = playbackIndexByRow.getOrElse(rowIndex) { 0 },
                                                 sourceLabel = "Home",
                                             )
                                         },
@@ -409,7 +421,7 @@ fun HomeScreen(
                                     onPlay = {
                                         musicPlayer.playQueue(
                                             tracks = playbackQueue,
-                                            startIndex = playbackIndexByRow[trayIndex],
+                                            startIndex = playbackIndexByRow.getOrElse(trayIndex) { 0 },
                                             sourceLabel = "Home",
                                         )
                                     },
@@ -885,7 +897,7 @@ private fun MixHeader(sortMode: HomeSortMode, onSortModeChange: (HomeSortMode) -
     val pillInteractionSource = remember { MutableInteractionSource() }
     val pillPressed by pillInteractionSource.collectIsPressedAsState()
     LaunchedEffect(pillPressed) {
-        if (pillPressed) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        if (pillPressed) haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
     }
     // A more pronounced dip than the shared rememberGroupPressScale (tuned
     // for full-width group rows) — a small pill needs a bigger relative
@@ -963,27 +975,27 @@ private fun MixHeader(sortMode: HomeSortMode, onSortModeChange: (HomeSortMode) -
                 modifier = Modifier.padding(vertical = 4.dp),
             ) {
                 SortOption(Icons.Filled.Schedule, "Recent", sortMode == HomeSortMode.RECENT) {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
                     onSortModeChange(HomeSortMode.RECENT); menuOpen = false
                 }
                 SortOption(Icons.Filled.BarChart, "Most Played", sortMode == HomeSortMode.MOST_PLAYED) {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
                     onSortModeChange(HomeSortMode.MOST_PLAYED); menuOpen = false
                 }
                 SortOption(Icons.Filled.DateRange, "Last 7 Days", sortMode == HomeSortMode.LAST_7_DAYS) {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
                     onSortModeChange(HomeSortMode.LAST_7_DAYS); menuOpen = false
                 }
                 SortOption(Icons.Filled.CalendarMonth, "Last 30 Days", sortMode == HomeSortMode.LAST_30_DAYS) {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
                     onSortModeChange(HomeSortMode.LAST_30_DAYS); menuOpen = false
                 }
                 SortOption(Icons.Filled.People, "Top Artists", sortMode == HomeSortMode.TOP_ARTISTS) {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
                     onSortModeChange(HomeSortMode.TOP_ARTISTS); menuOpen = false
                 }
                 SortOption(Icons.Filled.Album, "Top Albums", sortMode == HomeSortMode.TOP_ALBUMS) {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
                     onSortModeChange(HomeSortMode.TOP_ALBUMS); menuOpen = false
                 }
             }

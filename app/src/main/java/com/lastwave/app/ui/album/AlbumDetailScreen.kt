@@ -108,7 +108,7 @@ fun AlbumDetailScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val musicPlayer = LocalMusicPlayer.current
-    val playbackState by musicPlayer.chromeState.collectAsStateWithLifecycle()
+    val playbackState by musicPlayer.listPlaybackState.collectAsStateWithLifecycle()
     val haptic = LocalHapticFeedback.current
 
     // System back / predictive-back gesture is owned by the wrapping
@@ -268,7 +268,7 @@ fun AlbumDetailScreen(
                                 splitArtists.forEach { artName ->
                                     Surface(
                                         onClick = {
-                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                             onOpenArtist(artName, if (splitArtists.size == 1) data.artistBrowseId else null)
                                         },
                                         shape = RoundedCornerShape(12.dp),
@@ -320,7 +320,7 @@ fun AlbumDetailScreen(
                             ) {
                                 FilledTonalIconButton(
                                     onClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                         viewModel.playShuffle()
                                     },
                                     enabled = data.tracks.isNotEmpty(),
@@ -341,7 +341,7 @@ fun AlbumDetailScreen(
                                 // Large Floating Primary Play Button (56dp circle)
                                 Surface(
                                     onClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                         viewModel.playAll()
                                     },
                                     enabled = data.tracks.isNotEmpty(),
@@ -366,7 +366,7 @@ fun AlbumDetailScreen(
 
                             FilledTonalButton(
                                 onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                     viewModel.toggleFavorite()
                                 },
                                 modifier = Modifier.fillMaxWidth(),
@@ -434,7 +434,7 @@ fun AlbumDetailScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                     viewModel.playAll(startIndex = index)
                                 },
                         ) {
@@ -498,7 +498,7 @@ fun AlbumDetailScreen(
 
                                 IconButton(
                                     onClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                         selectedTrackMenu = track
                                     },
                                     modifier = Modifier.size(36.dp),
@@ -634,7 +634,7 @@ fun AlbumDetailScreen(
                 ) {
                     FilledTonalIconButton(
                         onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                             viewModel.playAll()
                         },
                         colors = IconButtonDefaults.filledTonalIconButtonColors(

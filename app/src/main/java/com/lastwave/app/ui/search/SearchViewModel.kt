@@ -29,6 +29,7 @@ data class SearchUiState(
     val status: SearchStatus = SearchStatus.IDLE,
     val results: List<SearchResultItem> = emptyList(),
     val suggestions: List<String> = emptyList(),
+    val songSuggestions: List<SearchResultItem> = emptyList(),
     val recentSearches: List<String> = emptyList(),
     val isShowingSuggestions: Boolean = false,
     /** Why a video-game (KHInsider) search failed, shown instead of "no results". */
@@ -64,11 +65,14 @@ class SearchViewModel @Inject constructor(
     }
 
     fun setQuery(query: String) {
-        _uiState.update { it.copy(query = query, isShowingSuggestions = query.isNotBlank()) }
+        _uiState.update {
+            it.copy(query = query, songSuggestions = emptyList(), isShowingSuggestions = query.isNotBlank())
+        }
         debounceJob?.cancel()
         suggestionsJob?.cancel()
 
         if (query.isBlank()) {
+            musicPlayer.cancelSearchResultWarm()
             searchJob?.cancel()
             _uiState.update {
                 it.copy(
@@ -102,6 +106,7 @@ class SearchViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 tab = tab,
+                songSuggestions = emptyList(),
                 isShowingSuggestions = false,
                 results = emptyList(),
                 status = if (it.query.isBlank()) SearchStatus.IDLE else SearchStatus.LOADING,
@@ -160,13 +165,7 @@ class SearchViewModel @Inject constructor(
         val tab = _uiState.value.tab
         when (tab) {
             SearchTab.TRACKS -> {
-                val selected = PlayableTrack(
-                    title = item.name,
-                    artist = item.artist.orEmpty(),
-                    album = item.subtitle,
-                    artworkUrl = item.artworkUrl,
-                    videoId = item.videoId,
-                )
+                val selected = trackResultToPlayable(item)
                 // Start immediately. Similar song radio queue loads and extends infinitely.
                 musicPlayer.play(selected, sourceLabel = "Search", startRadio = true)
             }
@@ -218,7 +217,11 @@ class SearchViewModel @Inject constructor(
                 it.copy(
                     status = if (results.isEmpty()) SearchStatus.EMPTY else SearchStatus.RESULTS,
                     results = results,
+                    songSuggestions = if (tab == SearchTab.TRACKS) results.take(5) else emptyList(),
                 )
+            }
+            if (tab == SearchTab.TRACKS) {
+                musicPlayer.warmLikelyPlays(results.map(::trackResultToPlayable))
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
@@ -233,7 +236,17 @@ class SearchViewModel @Inject constructor(
         }
     }
 
+    /** One construction for taps and warm-ups so the warmed addon query matches the played one. */
+    private fun trackResultToPlayable(item: SearchResultItem) = PlayableTrack(
+        title = item.name,
+        artist = item.artist.orEmpty(),
+        album = item.subtitle,
+        artworkUrl = item.artworkUrl,
+        videoId = item.videoId,
+    )
+
     fun clearQuery() {
+        musicPlayer.cancelSearchResultWarm()
         debounceJob?.cancel()
         suggestionsJob?.cancel()
         searchJob?.cancel()
@@ -243,6 +256,7 @@ class SearchViewModel @Inject constructor(
                 status = SearchStatus.IDLE,
                 results = emptyList(),
                 suggestions = emptyList(),
+                songSuggestions = emptyList(),
                 isShowingSuggestions = false,
             )
         }

@@ -84,6 +84,7 @@ class SettingsClearAllDataTest {
     private val innerTube = mockk<com.lastwave.app.data.music.InnerTubeMusicApi>(relaxed = true)
     private val appUpdateManager = mockk<com.lastwave.app.data.update.AppUpdateManager>(relaxed = true)
     private val spotifyPreferences = mockk<com.lastwave.app.data.spotify.SpotifyPreferences>(relaxed = true)
+    private val autoMixPreferences = mockk<com.lastwave.app.playback.automix.api.AutoMixPreferences>(relaxed = true)
 
     private lateinit var viewModel: SettingsViewModel
     private val order = mutableListOf<String>()
@@ -133,7 +134,6 @@ class SettingsClearAllDataTest {
             discoverRepository = discoverRepository,
             backupRepository = backupRepository,
             driveSync = io.mockk.mockk(relaxed = true),
-            autoMixPreferences = io.mockk.mockk(relaxed = true),
             playlistRepository = playlistRepository,
             musicPlayer = musicPlayer,
             downloadManager = downloadManager,
@@ -153,6 +153,7 @@ class SettingsClearAllDataTest {
             innerTube = innerTube,
             appUpdateManager = appUpdateManager,
             spotifyPreferences = spotifyPreferences,
+            autoMixPreferences = autoMixPreferences,
             context = RuntimeEnvironment.getApplication(),
         )
     }

@@ -4,7 +4,9 @@ import android.net.Uri
 import androidx.media3.common.C
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.TransferListener
+import java.io.IOException
 
 /**
  * Wraps an upstream [DataSource] to issue chunked HTTP Range requests (~1 MB range chunks)
@@ -12,6 +14,13 @@ import androidx.media3.datasource.TransferListener
  *
  * This prevents YouTube's server-side bandwidth throttling on open-ended Range requests
  * and prevents HTTP 403 on client profiles (such as IOS) that strictly mandate bounded Range headers.
+ *
+ * End of input is reported only at the real end of the file: the requested
+ * length, the total size from `Content-Range`, or an HTTP 416 past the last
+ * byte. A failed chunk request (expired URL, dropped connection) is thrown as
+ * an error instead, so playback retries / re-resolves the same song. Reporting
+ * it as end of input made ExoPlayer treat the song as finished and skip to the
+ * next one halfway through.
  */
 class ChunkedRangeDataSource(
     private val upstream: DataSource,
@@ -24,7 +33,9 @@ class ChunkedRangeDataSource(
     private var bytesReadTotal: Long = 0L
     private var currentChunkRemaining: Long = 0L
     private var isCurrentChunkOpen: Boolean = false
-    private var contentLength: Long = C.LENGTH_UNSET.toLong()
+    private var chunked: Boolean = false
+    /** Total resource size from Content-Range, or LENGTH_UNSET. */
+    private var totalLength: Long = C.LENGTH_UNSET.toLong()
 
     override fun addTransferListener(transferListener: TransferListener) {
         upstream.addTransferListener(transferListener)
@@ -40,19 +51,26 @@ class ChunkedRangeDataSource(
         currentPosition = dataSpec.position
         requestedLength = dataSpec.length
         bytesReadTotal = 0L
-        contentLength = C.LENGTH_UNSET.toLong()
+        totalLength = C.LENGTH_UNSET.toLong()
 
         val isYouTube = dataSpec.uri.host?.let { host ->
             host.contains("googlevideo.com") || host.contains("youtube.com")
         } == true
 
-        if (!isYouTube || (dataSpec.length != C.LENGTH_UNSET.toLong() && dataSpec.length <= chunkSize)) {
+        chunked = isYouTube && (dataSpec.length == C.LENGTH_UNSET.toLong() || dataSpec.length > chunkSize)
+        if (!chunked) {
             // Non-YouTube requests or small requests pass through directly
             return openUpstream(dataSpec)
         }
 
         openNextChunk()
-        return if (requestedLength != C.LENGTH_UNSET.toLong()) requestedLength else C.LENGTH_UNSET.toLong()
+        return if (requestedLength != C.LENGTH_UNSET.toLong()) {
+            requestedLength
+        } else if (totalLength != C.LENGTH_UNSET.toLong()) {
+            (totalLength - dataSpec.position).coerceAtLeast(0L)
+        } else {
+            C.LENGTH_UNSET.toLong()
+        }
     }
 
     private fun openNextChunk() {
@@ -66,6 +84,10 @@ class ChunkedRangeDataSource(
             val remaining = requestedLength - bytesReadTotal
             if (remaining <= 0) return
             minOf(chunkSize, remaining)
+        } else if (totalLength != C.LENGTH_UNSET.toLong()) {
+            val remaining = totalLength - currentPosition
+            if (remaining <= 0) return
+            minOf(chunkSize, remaining)
         } else {
             chunkSize
         }
@@ -76,13 +98,29 @@ class ChunkedRangeDataSource(
             .build()
 
         val opened = openUpstream(chunkSpec)
-        // "bytes a-b/total" tells where the file ends; a short chunk does too.
-        contentLength = upstream.responseHeaders.entries
-            .firstOrNull { it.key.equals("Content-Range", ignoreCase = true) }
-            ?.value?.firstOrNull()?.substringAfterLast('/')?.toLongOrNull()
-            ?: if (opened != C.LENGTH_UNSET.toLong() && opened < chunkLength) currentPosition + opened else contentLength
         currentChunkRemaining = if (opened != C.LENGTH_UNSET.toLong()) opened else chunkLength
+        if (totalLength == C.LENGTH_UNSET.toLong()) {
+            totalLength = parseContentRangeTotal(upstream.responseHeaders)
+        }
     }
+
+    /** Opens the next chunk; false only when the file is genuinely finished. */
+    private fun openNextChunkOrEnd(): Boolean {
+        if (atEnd()) return false
+        try {
+            openNextChunk()
+        } catch (error: HttpDataSource.InvalidResponseCodeException) {
+            // 416: the range starts past the last byte - the real end of an
+            // open-ended stream. Anything else is a failure, never an end.
+            if (error.responseCode == 416 && requestedLength == C.LENGTH_UNSET.toLong()) return false
+            throw error
+        }
+        return isCurrentChunkOpen && currentChunkRemaining > 0
+    }
+
+    private fun atEnd(): Boolean =
+        (requestedLength != C.LENGTH_UNSET.toLong() && bytesReadTotal >= requestedLength) ||
+            (totalLength != C.LENGTH_UNSET.toLong() && currentPosition >= totalLength)
 
     private fun openUpstream(dataSpec: DataSpec): Long {
         // DefaultDataSource assigns its active source before open() completes.
@@ -104,45 +142,42 @@ class ChunkedRangeDataSource(
     }
 
     override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
-        val spec = currentDataSpec ?: return C.RESULT_END_OF_INPUT
+        if (length == 0) return 0
+        currentDataSpec ?: return C.RESULT_END_OF_INPUT
+        if (!chunked) return upstream.read(buffer, offset, length)
 
-        val isYouTube = spec.uri.host?.let { host ->
-            host.contains("googlevideo.com") || host.contains("youtube.com")
-        } == true
-
-        if (!isYouTube || (requestedLength != C.LENGTH_UNSET.toLong() && requestedLength <= chunkSize)) {
-            return upstream.read(buffer, offset, length)
-        }
-
-        if (requestedLength != C.LENGTH_UNSET.toLong() && bytesReadTotal >= requestedLength) {
-            return C.RESULT_END_OF_INPUT
-        }
-
-        if (currentChunkRemaining <= 0) {
-            if (contentLength != C.LENGTH_UNSET.toLong() && currentPosition >= contentLength) {
-                return C.RESULT_END_OF_INPUT
+        // Bounded: a chunk that opens but yields nothing twice in a row is
+        // either the end (no size known) or a broken server response.
+        var emptyChunks = 0
+        while (true) {
+            if (atEnd()) return C.RESULT_END_OF_INPUT
+            if (currentChunkRemaining <= 0) {
+                if (!openNextChunkOrEnd()) return C.RESULT_END_OF_INPUT
             }
-            // A failed open must reach ExoPlayer, which retries while the buffer plays on;
-            // reported as end of input it cut the stream at the 1 MB boundary (~1:04).
-            openNextChunk()
-            if (!isCurrentChunkOpen || currentChunkRemaining <= 0) {
-                return C.RESULT_END_OF_INPUT
+            val bytesToRead = minOf(length.toLong(), currentChunkRemaining).toInt()
+            val bytesRead = upstream.read(buffer, offset, bytesToRead)
+            if (bytesRead == C.RESULT_END_OF_INPUT) {
+                // This chunk closed early (connection dropped) or exactly at
+                // its end. Either way continue from the byte we actually have.
+                currentChunkRemaining = 0L
+                if (++emptyChunks >= 2) {
+                    if (requestedLength == C.LENGTH_UNSET.toLong() && totalLength == C.LENGTH_UNSET.toLong()) {
+                        return C.RESULT_END_OF_INPUT
+                    }
+                    throw IOException("Stream ended at byte $currentPosition before its declared length")
+                }
+                continue
             }
+            currentPosition += bytesRead
+            bytesReadTotal += bytesRead
+            currentChunkRemaining -= bytesRead
+            return bytesRead
         }
-
-        val bytesToRead = minOf(length.toLong(), currentChunkRemaining).toInt()
-        val bytesRead = upstream.read(buffer, offset, bytesToRead)
-        // The response ended before its chunk did: that is the end of the file.
-        // (Reopening here returned bytes it never counted, so the next chunk repeated them.)
-        if (bytesRead == C.RESULT_END_OF_INPUT) return C.RESULT_END_OF_INPUT
-
-        currentPosition += bytesRead
-        bytesReadTotal += bytesRead
-        currentChunkRemaining -= bytesRead
-        return bytesRead
     }
 
     override fun getUri(): Uri? = upstream.uri
+
+    override fun getResponseHeaders(): Map<String, List<String>> = upstream.responseHeaders
 
     override fun close() {
         if (isCurrentChunkOpen) {
@@ -155,5 +190,17 @@ class ChunkedRangeDataSource(
 
     companion object {
         const val DEFAULT_CHUNK_SIZE = 1024 * 1024L // 1 MB chunk (within ~512 KB–2 MB)
+
+        private val CONTENT_RANGE_TOTAL = Regex("""/\s*(\d+)\s*$""")
+
+        /** "bytes 0-1048575/3456789" -> 3456789; LENGTH_UNSET when absent or "*". */
+        internal fun parseContentRangeTotal(headers: Map<String, List<String>>): Long {
+            val value = headers.entries
+                .firstOrNull { it.key.equals("Content-Range", ignoreCase = true) }
+                ?.value?.firstOrNull()
+                ?: return C.LENGTH_UNSET.toLong()
+            return CONTENT_RANGE_TOTAL.find(value)?.groupValues?.get(1)?.toLongOrNull()
+                ?: C.LENGTH_UNSET.toLong()
+        }
     }
 }

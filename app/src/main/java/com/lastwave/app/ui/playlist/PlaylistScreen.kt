@@ -11,6 +11,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -45,6 +46,8 @@ import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.FilledTonalButton
@@ -53,6 +56,7 @@ import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -130,13 +134,14 @@ import java.util.Locale
 @Composable
 fun PlaylistScreen(
     onOpenPlaylist: (Long) -> Unit = {},
+    onOpenFeedPlaylist: (String) -> Unit = {},
     onOpenGenerator: () -> Unit = {},
     viewModel: PlaylistViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
-    val playbackState by musicPlayer.chromeState.collectAsStateWithLifecycle()
+    val playbackState by musicPlayer.listPlaybackState.collectAsStateWithLifecycle()
     val addToPlaylist = com.lastwave.app.ui.player.LocalAddToPlaylist.current
     var searchQuery by remember { mutableStateOf("") }
     var coverEditorPlaylistId by remember { mutableStateOf<Long?>(null) }
@@ -174,10 +179,17 @@ fun PlaylistScreen(
             var sortMenuExpanded by remember { mutableStateOf(false) }
             ExpressiveHeader(
                 title = if (selectedPlaylists.isNotEmpty()) stringResource(R.string.pl_selected_count, selectedPlaylists.size) else stringResource(R.string.pl_title),
-                subtitle = if (filter != LibraryFilter.PLAYLISTS) null else if (selectedPlaylists.isNotEmpty()) stringResource(R.string.pl_select_more_hint) else if (state.playlists.any { it.isYouTubeOnly && it.remoteTrackCount == null }) {
-                    stringResource(R.string.pl_count_only, state.playlists.size)
+                subtitle = if (filter != LibraryFilter.PLAYLISTS) null else if (selectedPlaylists.isNotEmpty()) {
+                    stringResource(R.string.pl_select_more_hint)
                 } else {
-                    stringResource(R.string.pl_count_tracks, state.playlists.size, state.playlists.sumOf { it.remoteTrackCount ?: it.tracks.size })
+                    val totalPlaylistsCount = state.playlists.size + (if (state.isSpotifySyncEnabled) state.spotifyPlaylists.size else 0)
+                    if (state.playlists.any { it.isYouTubeOnly && it.remoteTrackCount == null }) {
+                        stringResource(R.string.pl_count_only, totalPlaylistsCount)
+                    } else {
+                        val totalTracks = state.playlists.sumOf { it.remoteTrackCount ?: it.tracks.size } +
+                            (if (state.isSpotifySyncEnabled) state.spotifyPlaylists.sumOf { it.trackCount } else 0)
+                        stringResource(R.string.pl_count_tracks, totalPlaylistsCount, totalTracks)
+                    }
                 },
                 actions = {
                     if (selectedPlaylists.isNotEmpty()) {
@@ -332,6 +344,13 @@ fun PlaylistScreen(
                 }
             }
 
+            val filteredSpotifyPlaylists = remember(state.spotifyPlaylists, searchQuery) {
+                if (searchQuery.isBlank()) state.spotifyPlaylists
+                else state.spotifyPlaylists.filter {
+                    it.name.contains(searchQuery, ignoreCase = true)
+                }
+            }
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -341,7 +360,7 @@ fun PlaylistScreen(
                     filter == LibraryFilter.ALBUMS -> FavoritesList(FavoriteKind.ALBUM)
                     filter == LibraryFilter.ARTISTS -> FavoritesList(FavoriteKind.ARTIST)
                     state.isLoading && state.playlists.isEmpty() && !state.isGenerating -> LoadingState()
-                    filteredPlaylists.isEmpty() && !state.isGenerating -> EmptyState()
+                    filteredPlaylists.isEmpty() && !state.isGenerating && (!state.isSpotifySyncEnabled || filteredSpotifyPlaylists.isEmpty()) -> EmptyState()
                     else -> LazyColumn(
                         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = FloatingNavDefaults.contentBottomPadding()),
                         verticalArrangement = Arrangement.spacedBy(com.lastwave.app.ui.common.GroupGap),
@@ -374,16 +393,38 @@ fun PlaylistScreen(
                             }
                         }
 
+                        val effectiveSpotify = if (state.isSpotifySyncEnabled) filteredSpotifyPlaylists else emptyList()
+                        val totalPlaylistCount = effectiveSpotify.size + filteredPlaylists.size
+
+                        if (effectiveSpotify.isNotEmpty()) {
+                            itemsIndexed(
+                                items = effectiveSpotify,
+                                key = { _, pl -> "sp_${pl.id}" },
+                            ) { index, pl ->
+                                Box(Modifier.animateItem()) {
+                                    SpotifyPlaylistCard(
+                                        playlist = pl,
+                                        position = com.lastwave.app.ui.common.groupPositionFor(index, totalPlaylistCount),
+                                        onClick = {
+                                            val routeId = if (pl.id == "liked") "sp_liked" else "sp_${pl.id}"
+                                            onOpenFeedPlaylist(routeId)
+                                        },
+                                    )
+                                }
+                            }
+                        }
+
                         itemsIndexed(
                             items = filteredPlaylists,
                             key = { _, playlist -> "pl_${playlist.id}_${playlist.remotePlaylistId ?: "local"}" },
                         ) { index, playlist ->
                             val isNewest = playlist.id == state.newestId
+                            val globalIndex = effectiveSpotify.size + index
                             Box(Modifier.animateItem()) {
                                 PlaylistCard(
                                     playlist = playlist,
                                     isNewest = isNewest,
-                                    position = com.lastwave.app.ui.common.groupPositionFor(index, filteredPlaylists.size),
+                                    position = com.lastwave.app.ui.common.groupPositionFor(globalIndex, totalPlaylistCount),
                                     isRegenerating = state.regeneratingId == playlist.id,
                                     currentTrack = playbackState.current,
                                     isPlaying = playbackState.isPlaying,
@@ -723,7 +764,7 @@ private fun PlaylistCard(
                     interactionSource = interactionSource,
                     indication = null,
                     onClick = {
-                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.ContextClick)
                         onClick()
                     },
                     onLongClick = {
@@ -958,3 +999,124 @@ private fun FormatOptionRow(title: String, description: String, selected: Boolea
 
 private fun formatDate(millis: Long): String =
     SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(Date(millis))
+
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun SpotifyPlaylistCard(
+    playlist: com.lastwave.app.data.playlist.SpotifyUserPlaylist,
+    position: com.lastwave.app.ui.common.GroupPosition = com.lastwave.app.ui.common.GroupPosition.SINGLE,
+    onClick: () -> Unit,
+) {
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val isLiked = playlist.id == "liked"
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val cardScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.975f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "spCardScale",
+    )
+
+    Card(
+        shape = com.lastwave.app.ui.common.groupShape(position),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = cardScale
+                scaleY = cardScale
+            },
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = {
+                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.ContextClick)
+                        onClick()
+                    },
+                )
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(60.dp)
+                    .clip(RoundedCornerShape(14.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (isLiked) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                androidx.compose.ui.graphics.Brush.linearGradient(
+                                    colors = listOf(
+                                        androidx.compose.ui.graphics.Color(0xFF1DB954),
+                                        androidx.compose.ui.graphics.Color(0xFF191414),
+                                    ),
+                                ),
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Favorite,
+                            contentDescription = null,
+                            modifier = Modifier.size(26.dp),
+                            tint = androidx.compose.ui.graphics.Color.White,
+                        )
+                    }
+                } else if (!playlist.artworkUrl.isNullOrBlank()) {
+                    coil.compose.AsyncImage(
+                        model = playlist.artworkUrl,
+                        contentDescription = playlist.name,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.QueueMusic,
+                            contentDescription = null,
+                            modifier = Modifier.size(26.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.width(14.dp))
+
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = playlist.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = if (isLiked) {
+                        "Spotify • ${stringResource(R.string.spotify_liked_songs_sub)}"
+                    } else {
+                        "Spotify • ${playlist.trackCount} tracks"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}

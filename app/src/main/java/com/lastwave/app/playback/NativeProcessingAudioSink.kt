@@ -121,6 +121,15 @@ class NativeProcessingAudioSink(
     /** Buffer already equalised: Media3 retries the same object until consumed. */
     private var directEqBuffer: ByteBuffer? = null
 
+    /**
+     * Music-haptics analyser. Fed here, before any routing, because this is the
+     * one place every decoded buffer passes through with its presentation time
+     * (DefaultAudioSink skips custom AudioProcessors on the float path).
+     */
+    var hapticsAnalyzer: com.lastwave.app.playback.haptics.MusicHapticsAnalyzer? = null
+    /** Buffer already analysed: Media3 retries the same object until consumed. */
+    private var hapticsBuffer: ByteBuffer? = null
+
     var onConfiguredFormat: ((sampleRateHz: Int, pcmEncoding: Int, channelCount: Int) -> Unit)? = null
     var bitDepthHintProvider: (() -> Int?)? = null
 
@@ -164,7 +173,61 @@ class NativeProcessingAudioSink(
             activeDelegate.getCurrentPositionUs(sourceEnded)
         }
 
+    private fun canReuseNativeProcessing(format: Format, outputChannels: IntArray?): Boolean {
+        if (!processingActive || nativePathDisabled || !processor.isAvailable || bitPerfectRequested || exclusiveWanted || internalWanted) {
+            return false
+        }
+        val current = configuredFormat ?: return false
+        val currentChannels = configuredOutputChannels
+        val channelsMatch = if (outputChannels == null && currentChannels == null) {
+            true
+        } else if (outputChannels != null && currentChannels != null) {
+            outputChannels.contentEquals(currentChannels)
+        } else {
+            false
+        }
+        return channelsMatch &&
+            format.sampleRate == current.sampleRate &&
+            format.channelCount == current.channelCount &&
+            format.pcmEncoding == current.pcmEncoding &&
+            format.sampleMimeType == current.sampleMimeType
+    }
+
     override fun configure(format: Format, specifiedBufferSize: Int, outputChannels: IntArray?) {
+        if (canReuseNativeProcessing(format, outputChannels)) {
+            configuredFormat = format
+            configuredBufferSize = specifiedBufferSize
+            configuredOutputChannels = outputChannels?.clone()
+            clearEndOfStream()
+            hasConfigured = true
+            exclusiveStartFailed = false
+            exclusiveEnded = false
+            internalEnded = false
+            internalStartFailed = false
+            if (format.sampleRate > 0) {
+                onConfiguredFormat?.invoke(format.sampleRate, format.pcmEncoding, format.channelCount)
+            }
+            processor.beginStream(format.encoderDelay, format.encoderPadding)
+            PlaybackDiagnostics.gaplessReuses.incrementAndGet()
+            val floatFormat = processedFormat ?: asFloatFormat(
+                format,
+                AudioProcessor.AudioFormat(
+                    processor.nativeOutputSampleRate,
+                    format.channelCount,
+                    C.ENCODING_PCM_FLOAT,
+                ),
+            )
+            activeDelegate.configure(floatFormat, 0, outputChannels)
+            return
+        }
+
+        pendingOutput?.let { pending ->
+            if (pending.hasRemaining()) {
+                runCatching {
+                    activeDelegate.handleBuffer(pending, pendingPresentationTimeUs, pendingAccessUnitCount)
+                }
+            }
+        }
         configuredFormat = format
         configuredBufferSize = specifiedBufferSize
         configuredOutputChannels = outputChannels?.clone()
@@ -444,8 +507,6 @@ class NativeProcessingAudioSink(
     }
 
     override fun handleDiscontinuity() {
-        clearPending()
-        clearEndOfStream()
         if (usbExclusive) {
             exclusiveUsb?.handleDiscontinuity()
             return
@@ -454,12 +515,7 @@ class NativeProcessingAudioSink(
             // Segment boundary, not a seek: the exclusive clock keeps running.
             return
         }
-        if (!processingActive) {
-            activeDelegate.handleDiscontinuity()
-            return
-        }
         try {
-            processor.flush()
             activeDelegate.handleDiscontinuity()
         } catch (error: Exception) {
             if (!recoverProcessingPath("Processed discontinuity handling failed", error)) throw error
@@ -477,6 +533,20 @@ class NativeProcessingAudioSink(
     ): Boolean {
         maybeAdoptExclusiveUsb()
         maybeAdoptInternalDirect()
+        val analyzer = hapticsAnalyzer
+        if (analyzer != null && hapticsBuffer !== buffer) {
+            hapticsBuffer = buffer
+            // Read-only (works on a duplicate) and before the EQ so it sees the source signal.
+            runCatching {
+                analyzer.analyze(
+                    buffer = buffer,
+                    format = configuredFormat,
+                    presentationTimeUs = presentationTimeUs,
+                    positionUs = { getCurrentPositionUs(false) },
+                    playbackSpeed = { getPlaybackParameters().speed },
+                )
+            }
+        }
         if (directEqBuffer !== buffer && isDirectEqRoute()) {
             directEq.process(buffer)
             directEqBuffer = buffer
@@ -484,7 +554,10 @@ class NativeProcessingAudioSink(
         val consumed = handleRoutedBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
         // Decoder buffers are recycled objects: once consumed, the next
         // payload in the same object must be equalised again.
-        if (consumed) directEqBuffer = null
+        if (consumed) {
+            directEqBuffer = null
+            hapticsBuffer = null
+        }
         return consumed
     }
 
@@ -1493,6 +1566,8 @@ class NativeProcessingAudioSink(
     override fun flush() {
         directEq.reset()
         directEqBuffer = null
+        hapticsBuffer = null
+        runCatching { hapticsAnalyzer?.flush() }
         clearPending()
         clearEndOfStream()
         exclusiveEnded = false
@@ -1533,6 +1608,8 @@ class NativeProcessingAudioSink(
     override fun reset() {
         directEq.reset()
         directEqBuffer = null
+        hapticsBuffer = null
+        runCatching { hapticsAnalyzer?.reset() }
         usbOutput?.setFormat(null)
         if (usbExclusive && exclusiveWanted) {
             exclusiveUsb?.prepareForNextItem()

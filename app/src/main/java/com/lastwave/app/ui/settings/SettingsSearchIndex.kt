@@ -35,8 +35,10 @@ import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.SmartDisplay
+import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.material.icons.filled.SwitchAccount
 import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.Tune
@@ -216,6 +218,23 @@ object SettingsSearchIndex {
                     icon = Icons.Filled.Lyrics,
                     iconContainer = { MaterialTheme.colorScheme.secondaryContainer },
                     iconTint = { MaterialTheme.colorScheme.onSecondaryContainer },
+                    parentTab = SettingsTab.AUDIO,
+                    section = "Audio & Playback",
+                    type = EntryType.TOGGLE,
+                )
+            )
+            add(
+                SettingsEntry(
+                    id = "audio.stop_on_recents",
+                    title = "Stop Playback When Swiped Away",
+                    subtitle = "Stop music when LastWave is removed from Recents",
+                    keywords = listOf(
+                        "recents", "swipe", "swipe away", "stop playback", "background playback",
+                        "continue playing", "task removed", "kill app", "close app"
+                    ),
+                    icon = Icons.Filled.StopCircle,
+                    iconContainer = { MaterialTheme.colorScheme.tertiaryContainer },
+                    iconTint = { MaterialTheme.colorScheme.onTertiaryContainer },
                     parentTab = SettingsTab.AUDIO,
                     section = "Audio & Playback",
                     type = EntryType.TOGGLE,
@@ -575,6 +594,23 @@ object SettingsSearchIndex {
                     icon = Icons.Filled.TextFields,
                     iconContainer = { MaterialTheme.colorScheme.secondaryContainer },
                     iconTint = { MaterialTheme.colorScheme.onSecondaryContainer },
+                    parentTab = SettingsTab.APPEARANCE,
+                    section = "Appearance",
+                    type = EntryType.TOGGLE,
+                )
+            )
+            add(
+                SettingsEntry(
+                    id = "appearance.ui_haptics",
+                    title = "Haptic Feedback",
+                    subtitle = "Vibrate on taps, buttons, toggles and gestures",
+                    keywords = listOf(
+                        "haptic", "haptics", "vibration", "vibrate", "touch feedback",
+                        "tap feedback", "buzz", "tactile"
+                    ),
+                    icon = Icons.Filled.Vibration,
+                    iconContainer = { MaterialTheme.colorScheme.primaryContainer },
+                    iconTint = { MaterialTheme.colorScheme.onPrimaryContainer },
                     parentTab = SettingsTab.APPEARANCE,
                     section = "Appearance",
                     type = EntryType.TOGGLE,
@@ -1040,6 +1076,23 @@ object SettingsSearchIndex {
                     parentTab = SettingsTab.SPOTIFY,
                     section = "Spotify",
                     type = EntryType.TOGGLE,
+                )
+            )
+            add(
+                SettingsEntry(
+                    id = "spotify.recommendations",
+                    title = "Recommendation provider",
+                    subtitle = "Seed recommendations from YouTube Music or Spotify",
+                    keywords = listOf(
+                        "recommendation", "recommendations", "algorithm", "provider", "radio",
+                        "discover", "mix", "mixes", "spotify recommendations", "youtube recommendations"
+                    ),
+                    icon = Icons.Filled.AutoAwesome,
+                    iconContainer = { MaterialTheme.colorScheme.tertiaryContainer },
+                    iconTint = { MaterialTheme.colorScheme.onTertiaryContainer },
+                    parentTab = SettingsTab.SPOTIFY,
+                    section = "Recommendations",
+                    type = EntryType.ACTION,
                 )
             )
             add(

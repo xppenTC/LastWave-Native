@@ -103,9 +103,20 @@ class ModulesViewModel @Inject constructor(
                 val manifestRes = client.manifest()
                 val manifestName = manifestRes.getOrNull()?.displayName ?: "HTTP Addon"
 
-                // A new addon is always added: replacing the only one made a second addon impossible.
+                val current = httpAddons.value
                 val targetId = if (id.isNullOrBlank()) {
-                    settingsPreferences.addHttpAddon(trimmed, manifestName).id
+                    // Adding never replaces another addon; re-adding the same
+                    // URL refreshes that entry instead of duplicating it.
+                    val existing = current.firstOrNull {
+                        com.lastwave.app.data.addon.AddonClient.normalizeBase(it.url) == trimmed
+                    }
+                    if (existing != null) {
+                        settingsPreferences.updateHttpAddon(existing.id, trimmed, manifestName)
+                        existing.id
+                    } else {
+                        val added = settingsPreferences.addHttpAddon(trimmed, manifestName)
+                        added.id
+                    }
                 } else {
                     settingsPreferences.updateHttpAddon(id, trimmed, manifestName)
                     id
@@ -129,6 +140,11 @@ class ModulesViewModel @Inject constructor(
 
     val addonSwitchSeconds: StateFlow<Int> = settingsPreferences.addonSwitchSeconds
     val directSourceStream: StateFlow<Boolean> = settingsPreferences.directSourceStream
+    val addonRace: StateFlow<Boolean> = settingsPreferences.addonRace
+
+    fun setAddonRace(enabled: Boolean) {
+        viewModelScope.launch { settingsPreferences.setAddonRace(enabled) }
+    }
 
     fun moveAddon(id: String, offset: Int) {
         viewModelScope.launch { settingsPreferences.moveHttpAddon(id, offset) }

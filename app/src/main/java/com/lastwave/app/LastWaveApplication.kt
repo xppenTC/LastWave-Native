@@ -53,6 +53,7 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         StartupTrail.mark("app.onCreate.start")
+        runCatching { com.lastwave.app.util.AppVisibility.install(this) }
         // Sync per-app locale (Settings -> Language) before any UI is drawn.
         // AppCompat restores the last requested locale itself; the collector
         // inside keeps it in sync with DataStore afterwards.
@@ -66,6 +67,11 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
         // First-song OPUS warmup: visitorData + NewPipe + BotGuard must be
         // ready before the first tap, not 2.5s after. Immediate and never
         // throws; the delayed block below keeps the rest lazy.
+        // Duplicate launcher icons after an update or icon change: make sure only
+        // the saved icon's alias is enabled. No-op when already correct.
+        applicationScope.launch(Dispatchers.IO) {
+            runCatching { themeRepository.get().reconcileAppIcon() }
+        }
         applicationScope.launch(Dispatchers.IO) {
             // NewPipe is optional fallback infrastructure. A broken extractor
             // install must not escape an application-scope coroutine.
@@ -171,6 +177,23 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
      *    seen rows are pure in-memory hits.
      *  - Hardware acceleration enabled for fast GPU texture uploading.
      */
+    /**
+     * Gives memory back when One UI / Android asks, so LastWave is a less
+     * attractive low-memory-kill target. Coil already trims its own cache.
+     * Only once the process is an idle background app (TRIM_MEMORY_BACKGROUND
+     * and above: no visible UI and no playback foreground service) is the
+     * headless BotGuard WebView released; playback rebuilds it on demand.
+     */
+    @Suppress("DEPRECATION")
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) {
+            applicationScope.launch {
+                runCatching { com.lastwave.app.data.music.potoken.BotGuardTokenGenerator.releaseForMemoryPressure() }
+            }
+        }
+    }
+
     override fun newImageLoader(): ImageLoader {
         val lowRamDevice = runCatching {
             (getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager)?.isLowRamDevice == true
@@ -219,8 +242,10 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
     }
 
     private companion object {
-        const val IMAGE_DISK_CACHE_BYTES = 32L * 1024 * 1024
-        const val LOW_RAM_IMAGE_DISK_CACHE_BYTES = 16L * 1024 * 1024
+        // High-res covers are 150-400 KB each: 32 MB held ~100 of them, so
+        // they kept re-downloading and the low-res placeholder showed meanwhile.
+        const val IMAGE_DISK_CACHE_BYTES = 256L * 1024 * 1024
+        const val LOW_RAM_IMAGE_DISK_CACHE_BYTES = 96L * 1024 * 1024
         const val ORPHAN_TEMP_MAX_AGE_MS = 6L * 60 * 60 * 1000
         const val OPTIONAL_STARTUP_DELAY_MS = 2_500L
     }

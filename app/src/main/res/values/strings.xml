@@ -6,6 +6,45 @@
     <string name="widget_obsidian_name">LastWave Obsidian Glass</string>
     <string name="widget_obsidian_description">Frosted obsidian glass player with translucent depth and crystal rim</string>
 
+    <!-- Wave home-screen widgets -->
+    <string name="wave_widget_strip_name">LastWave Strip · 3×1–4×1</string>
+    <string name="wave_widget_strip_description">Full-cover player with like, previous, play, next and shuffle; resize between 3×1 and 4×1</string>
+    <string name="wave_widget_glass_name">LastWave Glass · 2×2</string>
+    <string name="wave_widget_glass_description">A fixed square glass player with cover colors, progress and playback controls</string>
+    <string name="wave_widget_circular_name">LastWave Wave Circular · 2×2</string>
+    <string name="wave_widget_circular_description">A fixed circular cover with a wave ring and previous, play and next controls</string>
+    <string name="wave_widget_library_name">LastWave Library Grid</string>
+    <string name="wave_widget_library_description">Now playing, four recent tracks and quick access; resize between 3×2 and 4×2</string>
+    <string name="wave_widget_recently_played">Recently played</string>
+    <string name="wave_widget_coming_next">Coming next</string>
+    <string name="wave_widget_no_up_next">Queue is empty</string>
+    <string name="wave_widget_quick_access">Quick access</string>
+    <string name="wave_widget_search">Search</string>
+    <string name="wave_widget_playlist_shortcut">Playlist shortcut</string>
+    <string name="wave_widget_no_recent">Your played music appears here</string>
+    <string name="wave_widget_preview_time">1:15 / 3:42</string>
+    <string name="wave_widget_unlike">Remove like</string>
+    <string name="wave_widget_shuffle_on">Turn shuffle off</string>
+    <string name="wave_widget_nothing_playing">Nothing playing</string>
+    <string name="wave_widget_tap_to_open">Tap to play something</string>
+    <string name="wave_widget_play">Play</string>
+    <string name="wave_widget_pause">Pause</string>
+    <string name="wave_widget_like">Like</string>
+    <string name="wave_widget_shuffle">Shuffle</string>
+    <string name="wave_widget_repeat">Repeat</string>
+    <string name="wave_widget_up_next">Up next</string>
+    <string name="wave_widget_playlists">Playlists</string>
+    <string name="wave_widget_playlist_liked">Liked</string>
+    <string name="wave_widget_playlist_recent">Recent</string>
+    <string name="wave_widget_playlist_most_played">Most played</string>
+    <string name="wave_widget_preview_title">Midnight Current</string>
+    <string name="wave_widget_preview_artist">LastWave Radio</string>
+    <string name="wave_widget_preview_next_one">Afterglow &#183; Lumen</string>
+    <string name="wave_widget_preview_next_two">Low Tide &#183; Nocturne</string>
+    <string name="wave_widget_preview_next_three">Signal Bloom &#183; Arc</string>
+    <string name="wave_widget_preview_playlist_four">Focus mix</string>
+    <string name="wave_widget_preview_playlist_five">Night drive</string>
+
     <!-- Bottom navigation -->
     <string name="nav_feed">Feed</string>
     <string name="nav_stats">Stats</string>
@@ -109,6 +148,8 @@
     <string name="settings_md3_nav_bar_sub">Enable modern floating dock navigation instead of classic bottom tabs</string>
     <string name="settings_hide_nav_tabs">Hide Navigation Tabs</string>
     <string name="settings_hide_nav_tabs_sub">Completely hide navigation tabs and switch between screens using swipe gestures only</string>
+    <string name="settings_ui_haptics">Haptic Feedback</string>
+    <string name="settings_ui_haptics_sub">Vibrate on taps, buttons, toggles and gestures</string>
     <string name="settings_lyrics_animation">Lyrics Animation</string>
     <string name="settings_lyrics_provider">Lyrics provider</string>
     <string name="settings_lyrics_provider_desc">Tried first for every song. If it returns nothing, the app automatically falls through to the other providers.</string>
@@ -144,6 +185,9 @@
     <string name="settings_crossfade_sub">Blend the end of a track into the next one</string>
     <string name="settings_keep_lyrics_screen_awake">Keep Screen Awake on Lyrics</string>
     <string name="settings_keep_lyrics_screen_awake_desc">Prevent screen from turning off while viewing lyrics</string>
+    <string name="settings_stop_on_recents">Stop Playback When Swiped Away</string>
+    <string name="settings_stop_on_recents_on">Removing LastWave from Recents stops playback</string>
+    <string name="settings_stop_on_recents_off">Playback continues in the background after leaving Recents</string>
     <string name="settings_download_lyrics">Download Synced Lyrics</string>
     <string name="settings_download_lyrics_on">Save .lrc companion files &amp; embed lyrics in downloads</string>
     <string name="settings_download_lyrics_off">Do not fetch or save lyrics when downloading</string>
@@ -217,11 +261,17 @@
     <string name="home_sections_desc">Hidden sections disappear from your Home tab. New sections from future updates stay visible until you hide them.</string>
     <string name="home_section_hero_title">Welcome hero</string>
     <string name="home_section_hero_sub">Greeting and infinite radio</string>
+    <string name="home_section_greeting_title">Greeting header</string>
+    <string name="home_section_greeting_sub">Daily greeting and current date</string>
+    <string name="home_section_infinite_radio_title">Infinite radio</string>
+    <string name="home_section_infinite_radio_sub">Instant radio based on your taste</string>
     <string name="home_section_quick_tiles_title">Quick access</string>
     <string name="home_section_quick_tiles_sub">Shortcut tiles</string>
-    <string name="home_section_taste_strip_title">Taste tags</string>
+    <string name="home_section_taste_strip_title">My genres</string>
     <string name="home_section_taste_strip_sub">Genre and mood quick radio</string>
-    <string name="home_section_quick_picks_title">Picked for you</string>
+    <string name="home_section_discover_title">Discover new music</string>
+    <string name="home_section_discover_sub">Rotates fresh songs on refresh</string>
+    <string name="home_section_quick_picks_title">Quick picks</string>
     <string name="home_section_quick_picks_sub">Quick picks matched to your taste</string>
     <string name="home_section_because_title">Because you listen to</string>
     <string name="home_section_because_sub">Dynamic recommendation shelf</string>
@@ -245,6 +295,8 @@
     <string name="home_section_releases_sub">Fresh drops and albums</string>
     <string name="home_section_friends_title">Your friends</string>
     <string name="home_section_friends_sub">Friends listening activity</string>
+    <string name="home_section_podcasts_title">Podcasts</string>
+    <string name="home_section_podcasts_sub">Popular podcast shows</string>
 
     <!-- Downloads: custom folder + organization -->
     <string name="dl_folder">Download folder</string>
@@ -634,6 +686,8 @@
     <string name="pd_loading">Loading tracks…</string>
     <string name="pd_empty">No tracks in this playlist yet.</string>
     <string name="pd_reorder_hint">Switch to Custom order to rearrange</string>
+    <string name="playlist_rearrange_songs">Rearrange songs</string>
+    <string name="playlist_rearrange_clear_search">Clear search to rearrange songs</string>
     <string name="pd_building">Building a fresh playlist…</string>
     <string name="pd_sort_custom">Custom order</string>
     <string name="pd_sort_date">Date added</string>
@@ -664,7 +718,7 @@
     <string name="feed_retry">Retry</string>
     <string name="feed_update_error">Couldn\'t update your feed. Please try again.</string>
     <string name="feed_quick_access">Quick access</string>
-    <string name="feed_your_sound">Your Sound</string>
+    <string name="feed_your_sound">My genres</string>
     <string name="feed_your_sound_sub">Tap a vibe to start instant radio</string>
     <string name="feed_picked_you">Picked for you</string>
     <string name="feed_quick_picks">Quick picks</string>
@@ -828,6 +882,7 @@
     <string name="dl_delete_title">Delete “%1$s”?</string>
     <string name="dl_delete_text">You can delete the local audio file to free storage space, or remove it from history only.</string>
     <string name="dl_delete_file">Delete File</string>
+    <string name="dl_delete_failed">Couldn\'t delete the file</string>
     <string name="dl_history_only">History Only</string>
     <string name="dl_filter_all">All</string>
     <string name="dl_filter_lossless">Lossless / FLAC</string>
@@ -1281,6 +1336,7 @@
     <string name="autoeq_custom_hint">Edited by hand. Choose the headphone again to get the AutoEQ profile back.</string>
     <string name="autoeq_choose">Choose headphones</string>
     <string name="autoeq_reset">Back to profile</string>
+    <string name="autoeq_reset_default">Reset to default</string>
     <string name="autoeq_curve_title">Frequency response</string>
     <string name="autoeq_target_title">Target</string>
     <string name="autoeq_target_hint">Other targets are applied as a difference from the lab\'s Harman-style target, then refitted.</string>
@@ -1366,4 +1422,22 @@
     <string name="fav_remove_cd">Remove from favorites</string>
     <string name="fav_albums_empty">No favorite albums yet. Tap the heart on an album page.</string>
     <string name="fav_artists_empty">No favorite artists yet. Tap the heart on an artist page.</string>
+
+    <!-- Recommendations -->
+    <string name="settings_section_recommendations">Recommendations</string>
+    <string name="settings_recommendations_title">Recommendation provider</string>
+    <string name="settings_recommendations_sub_disconnected">YouTube Music • Connect Spotify to seed from Spotify</string>
+    <string name="settings_recommendations_dialog_desc">Picks the tracks behind Home, radio, Discover and mixes. Playback stays on YouTube Music either way.</string>
+    <string name="settings_recommendations_connect_first">Connect Spotify first</string>
+    <string name="recommendation_source_yt_music">YouTube Music</string>
+    <string name="recommendation_source_yt_music_sub">Seeded by YouTube Music</string>
+    <string name="recommendation_source_spotify">Spotify</string>
+    <string name="recommendation_source_spotify_sub">Seeded by Spotify, played from YouTube Music</string>
+    <string name="toast_spotify_connect_first">Connect Spotify first</string>
+    <string name="toast_spotify_disconnected">Spotify account disconnected</string>
+    <string name="settings_spotify_live_playlists_title">Live sync playlists</string>
+    <string name="settings_spotify_live_playlists_sub">Show Spotify playlists &amp; Liked Songs in your Playlists library</string>
+    <string name="spotify_playlists_section_title">Spotify</string>
+    <string name="spotify_liked_songs_title">Liked Songs</string>
+    <string name="spotify_liked_songs_sub">Your Spotify likes</string>
 </resources>

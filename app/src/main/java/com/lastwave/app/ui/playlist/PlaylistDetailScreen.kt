@@ -217,7 +217,7 @@ fun PlaylistDetailScreen(
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
-    val playbackState by musicPlayer.chromeState.collectAsStateWithLifecycle()
+    val playbackState by musicPlayer.listPlaybackState.collectAsStateWithLifecycle()
 
     LaunchedEffect(playlistId) {
         viewModel.loadDetail(playlistId)
@@ -411,7 +411,8 @@ fun PlaylistDetailScreen(
         !playlist.isYouTubeOnly &&
         (!hasManyFolders || selectedFolderUri == null || selectedFolderUri == "__all__") &&
         currentSort == PlaylistTrackSort.CUSTOM &&
-        sortAscending
+        sortAscending &&
+        searchQuery.isBlank()
     // Stable content keys aligned to the DISPLAYED order (not playlist.tracks
     // order) so animateItem() never sees duplicate or shifting keys at the
     // scroll edge. The old code built keys from playlist.tracks but consumed
@@ -432,8 +433,14 @@ fun PlaylistDetailScreen(
             "$base#$n"
         }
     }
-    LaunchedEffect(playlist.tracks.size, displayTracks.size) {
-        if (draggingIndex < 0 || draggingIndex >= displayTracks.size) {
+    // "Play" starts the first displayed row (sort/filter applied): warm the
+    // opening rows while the user looks. Local files are skipped downstream.
+    val openingKeys = displayKeys.take(6)
+    LaunchedEffect(openingKeys) {
+        musicPlayer.warmLikelyPlays(displayTracks.take(6).map(GeneratedTrack::toPlayableTrack))
+    }
+    LaunchedEffect(playlist.tracks.size, displayTracks.size, reorderEnabled) {
+        if (!reorderEnabled || draggingIndex < 0 || draggingIndex >= displayTracks.size) {
             cancelEdgeScroll()
             draggingIndex = -1
             dragOffsetY = 0f
@@ -554,7 +561,7 @@ fun PlaylistDetailScreen(
                         // Circular Shuffle Button
                         FilledTonalIconButton(
                             onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                 if (isThisPlaylistPlaying) {
                                     musicPlayer.toggleShuffle()
                                 } else if (displayTracks.isNotEmpty()) {
@@ -596,7 +603,7 @@ fun PlaylistDetailScreen(
 
                         Button(
                             onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                 if (displayTracks.isNotEmpty()) {
                                     musicPlayer.playQueue(
                                         displayTracks.map(GeneratedTrack::toPlayableTrack),
@@ -635,7 +642,7 @@ fun PlaylistDetailScreen(
                         // Locate current song
                         FilledTonalIconButton(
                             onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                 val playingTrack = playbackState.current
                                 if (playingTrack != null && isThisPlaylistPlaying) {
                                     val index = displayTracks.indexOfFirst { it.name.equals(playingTrack.title, ignoreCase = true) && it.artist.equals(playingTrack.artist, ignoreCase = true) }
@@ -734,7 +741,7 @@ fun PlaylistDetailScreen(
                         Box {
                             Surface(
                                 onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                     sortMenuOpen = true
                                 },
                                 shape = RoundedCornerShape(50),
@@ -802,7 +809,7 @@ fun PlaylistDetailScreen(
                                             }
                                         },
                                         onClick = {
-                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                             if (currentSort == option) {
                                                 sortAscending = !sortAscending
                                             } else {
@@ -833,7 +840,7 @@ fun PlaylistDetailScreen(
                             )
                             IconButton(
                                 onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                     isReorderLocked = !isReorderLocked
                                 },
                                 modifier = Modifier.size(36.dp),
@@ -892,7 +899,7 @@ fun PlaylistDetailScreen(
                 item(key = "all_local_songs_folder", contentType = "folder_card") {
                     Surface(
                         onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                             selectedFolderUri = "__all__"
                         },
                         shape = RoundedCornerShape(18.dp),
@@ -961,7 +968,7 @@ fun PlaylistDetailScreen(
 
                     Surface(
                         onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                             selectedFolderUri = folder.toString()
                         },
                         shape = RoundedCornerShape(18.dp),
@@ -1015,7 +1022,7 @@ fun PlaylistDetailScreen(
                             }
                             IconButton(
                                 onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                     localSongsViewModel.forget(folder)
                                 },
                                 enabled = !running,
@@ -1063,7 +1070,10 @@ fun PlaylistDetailScreen(
                 if (!isReorderLocked && !reorderEnabled && !playlist.isYouTubeOnly && displayTracks.size > 1) {
                     item(key = "reorder_sort_hint", contentType = "hint") {
                         Text(
-                            stringResource(com.lastwave.app.R.string.pd_reorder_hint),
+                            stringResource(
+                                if (searchQuery.isNotBlank()) com.lastwave.app.R.string.playlist_rearrange_clear_search
+                                else com.lastwave.app.R.string.pd_reorder_hint,
+                            ),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
@@ -1108,7 +1118,7 @@ fun PlaylistDetailScreen(
                                 null
                             },
                             onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                 selectedKeys?.let { picked ->
                                     selectedKeys = if (stableKey in picked) picked - stableKey else picked + stableKey
                                     return@NativeTrackRow
@@ -1128,7 +1138,7 @@ fun PlaylistDetailScreen(
                                 }
                             },
                             onMenu = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                 menuTarget = track
                             },
                             dragHandle = if (!reorderEnabled) {
@@ -1268,7 +1278,7 @@ fun PlaylistDetailScreen(
                 // Circular back button
                 IconButton(
                     onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                         if (isLocalSongs && selectedFolderUri != null) {
                             selectedFolderUri = null
                         } else {
@@ -1330,7 +1340,7 @@ fun PlaylistDetailScreen(
                 ) {
                     FilledTonalIconButton(
                         onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                             val playingTrack = playbackState.current
                             if (playingTrack != null && isThisPlaylistPlaying) {
                                 val index = displayTracks.indexOfFirst { it.name.equals(playingTrack.title, ignoreCase = true) && it.artist.equals(playingTrack.artist, ignoreCase = true) }
@@ -1359,7 +1369,7 @@ fun PlaylistDetailScreen(
                     Row {
                         IconButton(
                             onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                 isSearchActive = !isSearchActive
                                 if (!isSearchActive) searchQuery = ""
                             },
@@ -1374,7 +1384,7 @@ fun PlaylistDetailScreen(
                         Box {
                             IconButton(
                                 onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                     overflowMenuOpen = true
                                 },
                                 modifier = Modifier.size(42.dp),
@@ -1402,6 +1412,25 @@ fun PlaylistDetailScreen(
                                     overflowMenuOpen = false
                                 },
                             )
+                            if (!playlist.isYouTubeOnly && !inFolderStep &&
+                                (!hasManyFolders || selectedFolderUri == "__all__")
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(com.lastwave.app.R.string.playlist_rearrange_songs)) },
+                                    leadingIcon = { Icon(Icons.Filled.DragHandle, contentDescription = null) },
+                                    enabled = playlist.tracks.size > 1,
+                                    onClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
+                                        currentSort = PlaylistTrackSort.CUSTOM
+                                        sortAscending = true
+                                        PlaylistSortMemory.save(context, playlistId, currentSort, sortAscending)
+                                        searchQuery = ""
+                                        isSearchActive = false
+                                        isReorderLocked = false
+                                        overflowMenuOpen = false
+                                    },
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text(if (playlist.isPinned) stringResource(com.lastwave.app.R.string.pd_unpin) else stringResource(com.lastwave.app.R.string.pd_pin_top)) },
                                 leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
@@ -1415,7 +1444,7 @@ fun PlaylistDetailScreen(
                                 text = { Text(stringResource(com.lastwave.app.R.string.local_choose_folder)) },
                                 leadingIcon = { Icon(Icons.Filled.CreateNewFolder, contentDescription = null) },
                                 onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                     folderPicker.launch(null)
                                     overflowMenuOpen = false
                                 },
@@ -1424,7 +1453,7 @@ fun PlaylistDetailScreen(
                                 text = { Text(stringResource(com.lastwave.app.R.string.pl_download_all)) },
                                 leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
                                 onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                     viewModel.downloadPlaylist(playlistId)
                                     overflowMenuOpen = false
                                 },
@@ -1433,7 +1462,7 @@ fun PlaylistDetailScreen(
                                 text = { Text(stringResource(com.lastwave.app.R.string.pd_cancel_downloads)) },
                                 leadingIcon = { Icon(Icons.Filled.Close, contentDescription = null) },
                                 onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                     viewModel.cancelPlaylistDownloads(playlistId)
                                     overflowMenuOpen = false
                                 },
@@ -1465,7 +1494,7 @@ fun PlaylistDetailScreen(
                                         },
                                         enabled = state.regeneratingId == null,
                                         onClick = {
-                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                             viewModel.regenerate(playlistId) { newId ->
                                                 onOpenPlaylist?.invoke(newId)
                                             }
@@ -1512,7 +1541,7 @@ fun PlaylistDetailScreen(
                                         )
                                     },
                                     onClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                         viewModel.toggleYtSync(playlistId)
                                         overflowMenuOpen = false
                                     },

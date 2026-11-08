@@ -12,6 +12,10 @@ import com.lastwave.app.data.local.AppIcon
 import com.lastwave.app.data.local.AppLanguage
 import com.lastwave.app.data.local.EqualizerSettings
 import com.lastwave.app.data.local.MiscSettings
+import com.lastwave.app.playback.haptics.MusicHapticsConfig
+import com.lastwave.app.playback.haptics.MusicHapticsEngineMode
+import com.lastwave.app.playback.haptics.MusicHapticsIntensity
+import com.lastwave.app.playback.haptics.MusicHapticsMode
 import com.lastwave.app.data.local.ScrobblerPreferences
 import com.lastwave.app.data.local.ScrobblerSettings
 import com.lastwave.app.data.local.SessionData
@@ -176,7 +180,31 @@ class SettingsViewModel @Inject constructor(
     fun disconnectSpotify() {
         viewModelScope.launch {
             spotifyPreferences.clearConnection()
-            _uiState.update { it.copy(toastMessage = "Spotify account disconnected") }
+            settingsPreferences.setRecommendationSource(com.lastwave.app.data.local.RecommendationSource.YOUTUBE_MUSIC)
+            settingsPreferences.setSpotifyPlaylistsSyncEnabled(false)
+            _uiState.update { it.copy(toastMessage = appContext.getString(com.lastwave.app.R.string.toast_spotify_disconnected)) }
+        }
+    }
+
+    fun setSpotifyPlaylistsSyncEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            if (enabled && !spotifyConnected.value) {
+                _uiState.update { it.copy(toastMessage = appContext.getString(com.lastwave.app.R.string.toast_spotify_connect_first)) }
+                return@launch
+            }
+            settingsPreferences.setSpotifyPlaylistsSyncEnabled(enabled)
+        }
+    }
+
+    fun setRecommendationSource(source: com.lastwave.app.data.local.RecommendationSource) {
+        viewModelScope.launch {
+            val usable = source != com.lastwave.app.data.local.RecommendationSource.SPOTIFY || spotifyConnected.value
+            settingsPreferences.setRecommendationSource(
+                if (usable) source else com.lastwave.app.data.local.RecommendationSource.YOUTUBE_MUSIC,
+            )
+            if (!usable) {
+                _uiState.update { it.copy(toastMessage = appContext.getString(com.lastwave.app.R.string.toast_spotify_connect_first)) }
+            }
         }
     }
 
@@ -508,6 +536,7 @@ class SettingsViewModel @Inject constructor(
     fun setLiquidGlass(enabled: Boolean) = launchSettingsAction("update Liquid Glass") { themeRepository.setLiquidGlass(enabled) }
     fun setMd3NavBar(enabled: Boolean) = launchSettingsAction("update MD3 Navigation Bar") { themeRepository.setMd3NavBar(enabled) }
     fun setHideNavTabs(enabled: Boolean) = launchSettingsAction("update Hide Navigation Tabs") { themeRepository.setHideNavTabs(enabled) }
+    fun setUiHaptics(enabled: Boolean) = launchSettingsAction("update Haptic Feedback") { themeRepository.setUiHaptics(enabled) }
     fun setAccentMode(mode: AccentMode) = launchSettingsAction("update accent mode") { themeRepository.setMode(mode) }
     fun setManualAccent(color: Color) = launchSettingsAction("update accent color") { themeRepository.setManualAccent(color) }
     fun openColorWheel() = _uiState.update { it.copy(showColorWheel = true) }
@@ -519,7 +548,6 @@ class SettingsViewModel @Inject constructor(
 
     fun setDynamicNowPlaying(enabled: Boolean) = launchSettingsAction("update dynamic theme") { themeRepository.setDynamicNowPlaying(enabled) }
     fun setUseCustomFont(enabled: Boolean) = launchSettingsAction("update the app font") { settingsPreferences.setUseCustomFont(enabled) }
-    fun setUseBoldFont(enabled: Boolean) = launchSettingsAction("update font weight") { settingsPreferences.setUseBoldFont(enabled) }
     fun setPreferLosslessStreaming(enabled: Boolean) = launchSettingsAction("update streaming preference") { settingsPreferences.setPreferLosslessStreaming(enabled) }
     fun setLosslessQuality(quality: Int) = launchSettingsAction("update streaming quality") { settingsPreferences.setLosslessQuality(quality) }
     fun setDownloadQuality(quality: Int) = launchSettingsAction("update download quality") { settingsPreferences.setDownloadQuality(quality) }
@@ -562,8 +590,51 @@ class SettingsViewModel @Inject constructor(
         settingsPreferences.setMusicVideoEnabled(enabled)
     }
 
+    fun setShowAutoEqInVolumePanel(enabled: Boolean) = launchSettingsAction("update show autoeq in volume panel") {
+        settingsPreferences.setShowAutoEqInVolumePanel(enabled)
+    }
+
     fun setButtonNowPlayingEnabled(enabled: Boolean) = launchSettingsAction("update button now playing setting") {
         settingsPreferences.setButtonNowPlayingEnabled(enabled)
+    }
+
+    // ── Music Haptics (Apple Music-style rhythm synchronization) ──
+
+    val isHardwareHapticGeneratorAvailable: Boolean
+        get() = musicPlayer.hapticsController.isHardwareHapticGeneratorAvailable()
+
+    val isDeviceHapticsCapable: Boolean
+        get() = musicPlayer.hapticsController.isDeviceHapticsCapable()
+
+    val isUsbExclusiveActive: Boolean
+        get() = musicPlayer.isUsbExclusiveActive
+
+    fun setMusicHapticsEnabled(enabled: Boolean) = launchSettingsAction("update music haptics enabled") {
+        settingsPreferences.setMusicHapticsEnabled(enabled)
+        if (enabled) {
+            musicPlayer.hapticsController.triggerPreviewPulse()
+        }
+    }
+
+    fun setMusicHapticsMode(mode: MusicHapticsMode) = launchSettingsAction("update music haptics mode") {
+        settingsPreferences.setMusicHapticsMode(mode)
+    }
+
+    fun setMusicHapticsIntensity(intensity: MusicHapticsIntensity) = launchSettingsAction("update music haptics intensity") {
+        settingsPreferences.setMusicHapticsIntensity(intensity)
+        musicPlayer.hapticsController.triggerPreviewPulse(intensity)
+    }
+
+    fun setMusicHapticsEngineMode(engineMode: MusicHapticsEngineMode) = launchSettingsAction("update music haptics engine mode") {
+        settingsPreferences.setMusicHapticsEngineMode(engineMode)
+    }
+
+    fun setMusicHapticsPauseOnBatterySaver(pause: Boolean) = launchSettingsAction("update music haptics battery saver") {
+        settingsPreferences.setMusicHapticsPauseOnBatterySaver(pause)
+    }
+
+    fun triggerHapticPreview(intensity: MusicHapticsIntensity) {
+        musicPlayer.hapticsController.triggerPreviewPulse(intensity)
     }
 
     // ── USB exclusive output (direct DAC, default OFF) ──
@@ -654,6 +725,10 @@ class SettingsViewModel @Inject constructor(
     fun setPodcastsEnabled(enabled: Boolean) = launchSettingsAction("update podcasts setting") {
         settingsPreferences.setPodcastsEnabled(enabled)
     }
+    fun setStopPlaybackOnTaskRemoved(enabled: Boolean) =
+        launchSettingsAction("update stop playback on recents setting") {
+            settingsPreferences.setStopPlaybackOnTaskRemoved(enabled)
+        }
     fun setWordByWordLyrics(enabled: Boolean) = launchSettingsAction("update word-by-word lyrics") { settingsPreferences.setWordByWordLyrics(enabled) }
     fun setLyricsProvider(provider: com.lastwave.app.data.local.LyricsProvider) = launchSettingsAction("update lyrics provider") { settingsPreferences.setLyricsProvider(provider) }
     fun setLyricsOffsetMs(offsetMs: Long) = launchSettingsAction("update lyrics sync offset") {
@@ -692,6 +767,10 @@ class SettingsViewModel @Inject constructor(
         launchSettingsAction("update automix thermal profile") {
             autoMixPreferences.setThermalProfile(profile)
         }
+
+    fun setAutoplaySimilarEnabled(enabled: Boolean) = launchSettingsAction("update autoplay") {
+        settingsPreferences.setAutoplaySimilarEnabled(enabled)
+    }
 
     fun setCrossfadeEnabled(enabled: Boolean) = launchSettingsAction("update crossfade") {
         settingsPreferences.setCrossfadeEnabled(enabled)
@@ -1115,7 +1194,6 @@ class SettingsViewModel @Inject constructor(
 
     fun setSubmitNowPlaying(enabled: Boolean) = launchSettingsAction("update Now Playing submission") { scrobblerPreferences.setSubmitNowPlaying(enabled) }
     fun setScrobblePercent(percent: Int) = launchSettingsAction("update the scrobble threshold") { scrobblerPreferences.setScrobblePercent(percent) }
-    fun setLiveTelemetryEnabled(enabled: Boolean) = launchSettingsAction("update live telemetry") { settingsPreferences.setLiveTelemetryEnabled(enabled) }
 
     // ── YouTube Music account ──
 

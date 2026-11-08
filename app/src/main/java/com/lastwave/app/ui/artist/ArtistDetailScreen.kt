@@ -54,7 +54,14 @@ import androidx.compose.material.icons.filled.Verified
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.lastwave.app.ui.common.EdgeToEdgeDialogWindow
+import com.lastwave.app.ui.player.CanvasArtworkPlayer
+import com.lastwave.app.ui.player.CanvasContentMode
 import com.lastwave.app.ui.player.CanvasVideoPlayer
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
@@ -129,7 +136,7 @@ fun ArtistDetailScreen(
     val isFavorite by viewModel.isFavorite.collectAsStateWithLifecycle()
     val artistCanvas by viewModel.artistCanvas.collectAsStateWithLifecycle()
     val musicPlayer = LocalMusicPlayer.current
-    val playbackState by musicPlayer.chromeState.collectAsStateWithLifecycle()
+    val playbackState by musicPlayer.listPlaybackState.collectAsStateWithLifecycle()
     val haptic = LocalHapticFeedback.current
 
     // System back / predictive-back gesture is owned by the wrapping
@@ -200,17 +207,24 @@ fun ArtistDetailScreen(
                 ) {
                     // 1. Artist Hero Section (Edge-to-Edge Full Bleed)
                     item(key = "artist_hero") {
-                        val motionVideoUrl = artistCanvas?.let { it.wideUrl ?: it.tallUrl ?: it.url }
+                        // Header is 460dp tall: on phones that box is portrait,
+                        // so the tall motion clip fits; wide only on wide screens.
+                        val headerWidthDp = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp
+                        val motionVideoUrl = artistCanvas?.motionUrlFor(containerAspect = headerWidthDp / 460f)
                         val hasVideoAnimation = artistCanvas != null && showHeaderVideo && !motionVideoUrl.isNullOrBlank()
+                        val activeArtistCanvas = remember(artistCanvas, motionVideoUrl) {
+                            artistCanvas?.let { canvas -> canvas.copy(url = motionVideoUrl ?: canvas.url) }
+                        }
 
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(460.dp)
+                                .clipToBounds()
                                 .then(
                                     if (hasVideoAnimation) {
                                         Modifier.clickable {
-                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                             showFullscreenMotion = true
                                         }
                                     } else Modifier
@@ -223,13 +237,35 @@ fun ArtistDetailScreen(
                             var artworkIndex by remember(data) { mutableStateOf(0) }
                             val artistArtwork = artworkCandidates.getOrNull(artworkIndex)
                             if (artistArtwork != null) {
-                                AsyncImage(
-                                    model = artistArtwork,
-                                    contentDescription = data.name,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize(),
-                                    onError = { artworkIndex++ },
-                                )
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                                        .drawWithContent {
+                                            drawContent()
+                                            val fadeFrac = 0.45f
+                                            val fadeStartY = size.height * (1f - fadeFrac)
+                                            drawRect(
+                                                brush = Brush.verticalGradient(
+                                                    0f to Color.Black,
+                                                    (fadeStartY / size.height) to Color.Black,
+                                                    1f to Color.Transparent,
+                                                    startY = 0f,
+                                                    endY = size.height,
+                                                ),
+                                                blendMode = BlendMode.DstIn,
+                                            )
+                                        },
+                                ) {
+                                    AsyncImage(
+                                        model = artistArtwork,
+                                        contentDescription = data.name,
+                                        contentScale = ContentScale.Crop,
+                                        alignment = Alignment.TopCenter,
+                                        modifier = Modifier.fillMaxSize(),
+                                        onError = { artworkIndex++ },
+                                    )
+                                }
                             } else {
                                 Surface(
                                     color = MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -247,26 +283,33 @@ fun ArtistDetailScreen(
                             }
 
                             // Apple Music Artist Motion animated looping video
-                            if (hasVideoAnimation) {
-                                CanvasVideoPlayer(
-                                    videoUrl = motionVideoUrl!!,
+                            if (hasVideoAnimation && activeArtistCanvas != null) {
+                                CanvasArtworkPlayer(
+                                    canvas = activeArtistCanvas,
                                     isPlaying = true,
-                                    enableScrim = false,
-                                    modifier = Modifier.fillMaxSize(),
+                                    contentMode = CanvasContentMode.CROP,
+                                    alignPortraitTop = true,
+                                    bottomFade = 0.45f,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clipToBounds(),
                                 )
                             }
 
-                            // Seamless dark gradient overlay (top scrim for status bar, bottom fade into background)
+                            // Seamless dark gradient overlay (top scrim for status bar, smooth multi-stop bottom fade into background)
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .background(
                                         Brush.verticalGradient(
-                                            0.0f to Color.Black.copy(alpha = 0.5f),
-                                            0.25f to Color.Transparent,
-                                            0.55f to Color.Black.copy(alpha = 0.25f),
-                                            0.82f to Color.Black.copy(alpha = 0.78f),
-                                            1.0f to MaterialTheme.colorScheme.background,
+                                            colorStops = arrayOf(
+                                                0.0f to Color.Black.copy(alpha = 0.55f),
+                                                0.22f to Color.Transparent,
+                                                0.50f to Color.Black.copy(alpha = 0.20f),
+                                                0.72f to MaterialTheme.colorScheme.background.copy(alpha = 0.65f),
+                                                0.90f to MaterialTheme.colorScheme.background.copy(alpha = 0.92f),
+                                                1.0f to MaterialTheme.colorScheme.background,
+                                            ),
                                         ),
                                     ),
                             )
@@ -289,7 +332,7 @@ fun ArtistDetailScreen(
                                         ) {
                                             IconButton(
                                                 onClick = {
-                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                                     showFullscreenMotion = true
                                                 },
                                                 modifier = Modifier.fillMaxSize(),
@@ -311,7 +354,7 @@ fun ArtistDetailScreen(
                                     ) {
                                         IconButton(
                                             onClick = {
-                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                                 showHeaderVideo = !showHeaderVideo
                                             },
                                             modifier = Modifier.fillMaxSize(),
@@ -424,7 +467,7 @@ fun ArtistDetailScreen(
                             ) {
                                 FilledTonalIconButton(
                                     onClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                         viewModel.playShuffle()
                                     },
                                     enabled = data.topSongs.isNotEmpty(),
@@ -444,7 +487,7 @@ fun ArtistDetailScreen(
 
                                 FilledTonalIconButton(
                                     onClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                         viewModel.startArtistMix()
                                     },
                                     shape = CircleShape,
@@ -465,7 +508,7 @@ fun ArtistDetailScreen(
                             // Large Floating Primary Play Button (56dp circle)
                             Surface(
                                 onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                     viewModel.playAll()
                                 },
                                 enabled = data.topSongs.isNotEmpty(),
@@ -607,7 +650,7 @@ fun ArtistDetailScreen(
                                     .adaptiveContentWidth(maxWidth = 860.dp)
                                     .padding(horizontal = 20.dp)
                                     .clickable {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                         val fullIndex = data.topSongs.indexOf(track).takeIf { it >= 0 } ?: index
                                         viewModel.playAll(startIndex = fullIndex)
                                     },
@@ -665,7 +708,7 @@ fun ArtistDetailScreen(
 
                                     IconButton(
                                         onClick = {
-                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                             selectedTrackMenu = track
                                         },
                                         modifier = Modifier.size(36.dp),
@@ -692,7 +735,7 @@ fun ArtistDetailScreen(
                                 ) {
                                     Surface(
                                         onClick = {
-                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                             showAllSongs = !showAllSongs
                                         },
                                         shape = RoundedCornerShape(24.dp),
@@ -924,7 +967,7 @@ fun ArtistDetailScreen(
                 ) {
                     FilledTonalIconButton(
                         onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                             viewModel.playAll()
                         },
                         colors = IconButtonDefaults.filledTonalIconButtonColors(
@@ -940,7 +983,10 @@ fun ArtistDetailScreen(
     }
 
     // Immersive Fullscreen Artist Motion View
-    val motionVideoUrl = artistCanvas?.let { it.wideUrl ?: it.tallUrl ?: it.url }
+    val screenConfig = androidx.compose.ui.platform.LocalConfiguration.current
+    val motionVideoUrl = artistCanvas?.motionUrlFor(
+        containerAspect = screenConfig.screenWidthDp.toFloat() / screenConfig.screenHeightDp.coerceAtLeast(1),
+    )
     if (showFullscreenMotion && !motionVideoUrl.isNullOrBlank()) {
         val artistData = (uiState as? ArtistUiState.Success)?.data
         val artistDisplayName = artistData?.name ?: artistName
@@ -1071,7 +1117,7 @@ fun ArtistDetailScreen(
                             ) {
                                 FilledTonalIconButton(
                                     onClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                         viewModel.playShuffle()
                                     },
                                     enabled = hasTopSongs,
@@ -1091,7 +1137,7 @@ fun ArtistDetailScreen(
 
                                 Surface(
                                     onClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                                         viewModel.playAll()
                                     },
                                     enabled = hasTopSongs,
@@ -1254,3 +1300,19 @@ private fun SimilarArtistCard(
 class ArtistDetailGenreBridge @javax.inject.Inject constructor(
     val genreExplorer: GenreExplorer,
 ) : androidx.lifecycle.ViewModel()
+
+/**
+ * Motion clip whose shape best fits a container of [containerAspect]
+ * (width / height): the tall (portrait) asset for portrait boxes such as
+ * the phone header or fullscreen portrait, the wide one for landscape boxes.
+ * Using the wide clip in a tall header forced a heavy crop.
+ */
+private fun com.lastwave.app.data.canvas.CanvasArtwork.motionUrlFor(containerAspect: Float): String? {
+    val candidates = if (containerAspect >= 1.2f) {
+        listOf(wideUrl, tallUrl, url)
+    } else {
+        listOf(tallUrl, url, wideUrl)
+    }
+    return candidates.firstOrNull { !it.isNullOrBlank() }
+}
+

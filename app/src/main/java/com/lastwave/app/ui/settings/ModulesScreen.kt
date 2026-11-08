@@ -80,6 +80,7 @@ fun ModulesScreen(
     val httpAddons by viewModel.httpAddons.collectAsStateWithLifecycle()
     val addonHealthMap by viewModel.addonHealthMap.collectAsStateWithLifecycle()
     val addonSwitchSeconds by viewModel.addonSwitchSeconds.collectAsStateWithLifecycle()
+    val addonRace by viewModel.addonRace.collectAsStateWithLifecycle()
     val directSourceStream by viewModel.directSourceStream.collectAsStateWithLifecycle()
     val draftHealth by viewModel.draftHealth.collectAsStateWithLifecycle()
 
@@ -340,6 +341,20 @@ fun ModulesScreen(
                         Column(Modifier.padding(16.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
+                                    Text(if (addonRace) "Race" else "Order", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                    Text(
+                                        if (addonRace) "Every addon is asked at once; the first one that has the track plays it"
+                                        else "Addons are tried one after another, in the order above",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Switch(checked = addonRace, onCheckedChange = viewModel::setAddonRace)
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
                                     Text("Switch to the next source after", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                                     Text(
                                         "How long an addon gets to find a track, or to start it, before the next one is tried",
@@ -353,6 +368,8 @@ fun ModulesScreen(
                             Slider(
                                 value = addonSwitchSeconds.toFloat(),
                                 onValueChange = { viewModel.setAddonSwitchSeconds(it.roundToInt()) },
+                                // Only the order mode takes turns.
+                                enabled = !addonRace,
                                 valueRange = ADDON_SWITCH_SECONDS_RANGE.first.toFloat()..ADDON_SWITCH_SECONDS_RANGE.last.toFloat(),
                                 steps = ADDON_SWITCH_SECONDS_RANGE.last - ADDON_SWITCH_SECONDS_RANGE.first - 1,
                             )

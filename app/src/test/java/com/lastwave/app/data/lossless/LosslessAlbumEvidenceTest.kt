@@ -7,7 +7,7 @@ import okhttp3.OkHttpClient
 import org.junit.Test
 
 class LosslessAlbumEvidenceTest {
-    private val api = LosslessMusicApi(OkHttpClient(), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true))
+    private val api = LosslessMusicApi(OkHttpClient(), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true))
 
     private fun overlap(wantedTitle: String, wantedAlbum: String, gotTitle: String, gotAlbum: String) =
         api.hasAlbumOrContextOverlap(parseTitle(wantedTitle), parseTitle(gotTitle), wantedAlbum, gotAlbum)
