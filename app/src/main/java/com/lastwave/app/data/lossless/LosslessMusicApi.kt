@@ -1291,7 +1291,7 @@ class LosslessMusicApi @Inject constructor(
         return result
     }
 
-    private fun hasAlbumOrContextOverlap(
+    internal fun hasAlbumOrContextOverlap(
         wanted: TitleParts,
         got: TitleParts,
         expectedAlbum: String?,
@@ -1309,14 +1309,15 @@ class LosslessMusicApi @Inject constructor(
             if (got.context.any { it in normExp }) return true
         }
         if (!expectedAlbum.isNullOrBlank() && !candidateAlbum.isNullOrBlank()) {
-            val normExp = normalizeText(expectedAlbum)
-            val normCand = normalizeText(candidateAlbum)
-            if (normExp.isNotBlank() && normCand.isNotBlank()) {
-                if (normExp == normCand || normExp.contains(normCand) || normCand.contains(normExp)) return true
-                val expTokens = normExp.split(' ').filter { it.length > 2 }.toSet()
-                val candTokens = normCand.split(' ').filter { it.length > 2 }.toSet()
-                if (expTokens.isNotEmpty() && candTokens.isNotEmpty() && expTokens.any { it in candTokens }) return true
-            }
+            // A single is named after its song: an album that only repeats the title says
+            // nothing about whose recording it is (Sofiane's "Dingue de toi" is not Djifason's).
+            val titleWords = (wanted.words + got.words).toSet()
+            fun albumWords(album: String) = album.lowercase(Locale.ROOT)
+                .split(Regex("""[\s.·/-]+"""))
+                .map { it.replace(NON_ALPHANUMERIC, "") }
+                .filter { it.length > 2 && it !in titleWords && it !in NOISE_WORDS }
+                .toSet()
+            if (albumWords(expectedAlbum).any { it in albumWords(candidateAlbum) }) return true
         }
         return false
     }
