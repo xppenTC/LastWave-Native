@@ -53,7 +53,7 @@ private fun Modifier.shimmer(pulse: Float, radius: Dp) =
 @Composable
 fun ShelfSquareSkeletonRow(cardWidth: Dp = rememberSquareCardWidth(), count: Int = 4) {
     val pulse = rememberShimmerPulse()
-    val coverHeight = cardWidth
+    val coverHeight = rememberCoverHeight()
     LazyRow(
         contentPadding = PaddingValues(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(CardTokens.cardGap),

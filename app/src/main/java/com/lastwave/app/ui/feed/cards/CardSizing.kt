@@ -7,7 +7,6 @@ package com.lastwave.app.ui.feed.cards
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -28,16 +27,9 @@ fun rememberCardDimensions(): CardDimensions {
 @Composable
 fun rememberCoverHeight(): Dp = rememberCardDimensions().coverHeight
 
-/** Square card width: two full cards with a small third-cover peek on phones. */
+/** Square card width: equals coverHeight for 1:1 aspect ratio. */
 @Composable
-fun rememberSquareCardWidth(): Dp {
-    val dimensions = rememberCardDimensions()
-    val peekWidth = with(LocalDensity.current) { 20.toDp() }
-    // Reserve the existing section margins, row start inset, and two card gaps.
-    val widthForTwoCards =
-        (dimensions.screenWidth - 48.dp - CardTokens.cardGap * 2 - peekWidth) / 2
-    return dimensions.squareWidth.coerceAtMost(widthForTwoCards)
-}
+fun rememberSquareCardWidth(): Dp = rememberCardDimensions().squareWidth
 
 /** Wide 16:9 card width: equals coverHeight * 16/9. */
 @Composable

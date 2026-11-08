@@ -1,5 +1,8 @@
 package com.lastwave.app.ui.feed
 
+import com.lastwave.app.ui.settings.DEFAULT_YT_MUSIC_SECTIONS
+import com.lastwave.app.ui.settings.YT_OTHER_SHELVES
+
 /** Words YouTube Music uses for the listed shelves, English and French (the settings list is English only). */
 private val YT_SHELF_ALIASES: Map<String, List<String>> = mapOf(
     "listen again" to listOf("listen again", "jump back", "réécouter"),
@@ -20,6 +23,9 @@ internal fun ytShelfMatches(title: String, listed: String): Boolean {
     return t == h || t.startsWith(h) || h.startsWith(t) || YT_SHELF_ALIASES[h].orEmpty().any { t.contains(it) }
 }
 
-/** Hidden when its listed section is unchecked. */
-internal fun ytShelfHidden(title: String, hidden: Set<String>): Boolean =
-    hidden.any { ytShelfMatches(title, it) }
+/** Hidden when its listed section is unchecked, or when it matches none and "other shelves" is unchecked. */
+internal fun ytShelfHidden(title: String, hidden: Set<String>): Boolean {
+    if (hidden.any { ytShelfMatches(title, it) }) return true
+    return hidden.any { it.equals(YT_OTHER_SHELVES, ignoreCase = true) } &&
+        DEFAULT_YT_MUSIC_SECTIONS.none { ytShelfMatches(title, it) }
+}
