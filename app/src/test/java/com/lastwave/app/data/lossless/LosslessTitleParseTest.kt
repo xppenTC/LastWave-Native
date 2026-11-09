@@ -36,6 +36,9 @@ class LosslessTitleParseTest {
         Triple("Saiyaara", "Shreya Ghoshal", "saiyaara"),
         Triple("Kaniya", "Alok Ranjan Srivastava", "kaniya"),
         Triple("Shape of You", "Ed Sheeran", "shape of you"),
+        // Spotify puts the remaster tag after a dash, year first or last.
+        Triple("I'm a Believer - 2006 Remaster", "The Monkees", "im a believer"),
+        Triple("Here Comes The Sun - Remastered 2009", "The Beatles", "here comes the sun"),
     )
 
     @Test

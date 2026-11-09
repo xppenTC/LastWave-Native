@@ -680,7 +680,9 @@ class LosslessMusicApi @Inject constructor(
             if (words.isEmpty()) return true
             if (words.joinToString("") in NEUTRAL_SEGMENTS) return true
             if (words.any { it in VERSION_WORDS }) return true
-            return words.all { it in NOISE_WORDS || it in NEUTRAL_SEGMENTS || it in VERSION_WORDS }
+            // Spotify's "I'm a Believer - 2006 Remaster": a year next to a noise word is still a tag.
+            return words.any { it in NOISE_WORDS || it in NEUTRAL_SEGMENTS } &&
+                words.all { it in NOISE_WORDS || it in NEUTRAL_SEGMENTS || it.all(Char::isDigit) }
         }
 
         private fun isArtistOrAlbumName(text: String, artist: String, album: String?): Boolean {
