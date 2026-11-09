@@ -508,6 +508,7 @@ fun SettingsScreen(
     val theme by viewModel.theme.collectAsStateWithLifecycle()
     val misc by viewModel.misc.collectAsStateWithLifecycle()
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val matchProgress by viewModel.matchProgress.collectAsStateWithLifecycle()
     val downloadCount by viewModel.downloadCount.collectAsStateWithLifecycle()
     val downloadTotalBytes by viewModel.downloadTotalBytes.collectAsStateWithLifecycle()
     val ytConnection by viewModel.ytConnection.collectAsStateWithLifecycle()
@@ -2229,6 +2230,7 @@ fun SettingsScreen(
                                             },
                                             position = position,
                                             isHighlighted = (highlightedSettingId == "library.import_file"),
+                                            progress = matchProgress,
                                         )
                                     }
                                 }
@@ -4342,6 +4344,7 @@ private fun SettingsActionCard(
     onClick: () -> Unit,
     position: GroupPosition = GroupPosition.SINGLE,
     isHighlighted: Boolean = false,
+    progress: com.lastwave.app.data.playlist.MatchProgress? = null,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val scale = rememberPressScale(interactionSource)
@@ -4373,6 +4376,7 @@ private fun SettingsActionCard(
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = titleColor, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                 Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                progress?.let { ImportProgressBar(it, Modifier.padding(top = 6.dp)) }
             }
             Icon(
                 Icons.Filled.ChevronRight,

@@ -309,6 +309,8 @@ class YouTubePlaylistImportViewModel @Inject constructor(
         }
     }
 
+    val matchProgress = importManager.matchProgress
+
     fun importCsv(
         inputStream: java.io.InputStream,
         filename: String,

@@ -228,6 +228,8 @@ class ExternalPlaylistImportViewModel @Inject constructor(
      * Runs the real import: [PlaylistImportManager] re-reads the playlist,
      * matches every row to a playable track and saves the playlist.
      */
+    val matchProgress = importManager.matchProgress
+
     fun import(onSuccess: (SavedPlaylist) -> Unit) {
         if (_uiState.value.isImporting) return
         val raw = _uiState.value.link

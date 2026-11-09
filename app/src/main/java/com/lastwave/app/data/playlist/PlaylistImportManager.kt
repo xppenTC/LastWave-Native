@@ -7,6 +7,9 @@ import com.lastwave.app.data.music.YouTubeMusicTrack
 import com.lastwave.app.data.music.YouTubePlaylistResult
 import com.lastwave.app.data.music.distinctPlaylistSongs
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import java.io.InputStream
 import javax.inject.Inject
@@ -20,6 +23,18 @@ class PlaylistImportManager @Inject constructor(
     private val spotifyPlaylistImporter: SpotifyPlaylistImporter,
     private val appleMusicPlaylistImporter: AppleMusicPlaylistImporter,
 ) {
+
+    private val _matchProgress = MutableStateFlow<MatchProgress?>(null)
+
+    /** Match pass of the running Spotify or file import; null when none runs. */
+    val matchProgress: StateFlow<MatchProgress?> = _matchProgress.asStateFlow()
+
+    private suspend fun <T> trackingProgress(block: suspend ((MatchProgress) -> Unit) -> T): T =
+        try {
+            block { _matchProgress.value = it }
+        } finally {
+            _matchProgress.value = null
+        }
 
     companion object {
         /** True for the account's special Liked Music / Liked Videos playlist (LM / VLLM / LL / VLLL). */
@@ -109,7 +124,7 @@ class PlaylistImportManager @Inject constructor(
         inputStream: InputStream,
         filename: String,
     ): Pair<SavedPlaylist, CsvImportResult> = withContext(Dispatchers.IO) {
-        val result = csvPlaylistImporter.parseAndMatchCsv(inputStream, filename)
+        val result = trackingProgress { csvPlaylistImporter.parseAndMatchCsv(inputStream, filename, it) }
         require(result.tracks.isNotEmpty()) {
             "No verified tracks found. Include track titles and artists, or YouTube links. Nothing was imported."
         }
@@ -138,7 +153,7 @@ class PlaylistImportManager @Inject constructor(
             ?: throw IllegalArgumentException("Paste a Spotify or Apple Music playlist link.")
 
         val result = when (source) {
-            ExternalPlaylistSource.SPOTIFY -> spotifyPlaylistImporter.fetchAndMatch(url)
+            ExternalPlaylistSource.SPOTIFY -> trackingProgress { spotifyPlaylistImporter.fetchAndMatch(url, it) }
             ExternalPlaylistSource.APPLE_MUSIC -> appleMusicPlaylistImporter.fetchAndMatch(url)
         }
 
@@ -161,7 +176,7 @@ class PlaylistImportManager @Inject constructor(
      */
     suspend fun importSpotifyLikedIntoLikedSongs(): Pair<SavedPlaylist, ExternalImportResult> =
         withContext(Dispatchers.IO) {
-            val result = spotifyPlaylistImporter.fetchAndMatchLikedSongs()
+            val result = trackingProgress { spotifyPlaylistImporter.fetchAndMatchLikedSongs(it) }
             require(result.tracks.isNotEmpty()) {
                 "No liked songs found on Spotify or none could be matched."
             }

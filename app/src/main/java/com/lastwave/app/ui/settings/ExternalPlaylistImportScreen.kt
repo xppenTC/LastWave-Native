@@ -100,6 +100,7 @@ fun ExternalPlaylistImportScreen(
     viewModel: ExternalPlaylistImportViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val matchProgress by viewModel.matchProgress.collectAsStateWithLifecycle()
     val clipboard = LocalClipboardManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val haptic = LocalHapticFeedback.current
@@ -595,6 +596,12 @@ fun ExternalPlaylistImportScreen(
                 .padding(bottom = 16.dp + LocalMiniPlayerScrollClearance.current)
                 .padding(horizontal = 20.dp),
         ) {
+          Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            matchProgress?.takeIf { state.isImporting }?.let { progress ->
+                Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                    ImportProgressBar(progress, Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
+                }
+            }
             Button(
                 onClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
@@ -630,7 +637,24 @@ fun ExternalPlaylistImportScreen(
                     )
                 }
             }
+          }
         }
+    }
+}
+
+/** Determinate bar for an import's match pass, with the "done / total" count under it. */
+@Composable
+internal fun ImportProgressBar(progress: com.lastwave.app.data.playlist.MatchProgress, modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        androidx.compose.material3.LinearProgressIndicator(
+            progress = { progress.done.toFloat() / progress.total.coerceAtLeast(1) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            "${progress.done} / ${progress.total}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

@@ -42,6 +42,9 @@ data class ExternalImportResult(
     val tracks: List<GeneratedTrack>,
 )
 
+/** Rows already looked up out of [total] during a running import's match pass. */
+data class MatchProgress(val done: Int, val total: Int)
+
 /** One Spotify playlist belonging to the connected Spotify user account. */
 data class SpotifyUserPlaylist(
     val id: String,

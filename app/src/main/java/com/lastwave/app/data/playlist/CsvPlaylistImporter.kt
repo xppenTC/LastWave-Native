@@ -45,12 +45,15 @@ class CsvPlaylistImporter @Inject constructor(
     suspend fun parseAndMatchCsv(
         inputStream: InputStream,
         filename: String = "Imported Playlist",
+        onProgress: (MatchProgress) -> Unit = {},
     ): CsvImportResult = withContext(Dispatchers.IO) {
         val rawTracks = parseTracks(decodeText(inputStream), filename)
         // Exported playlists repeat rows often. Collapsing them up front keeps
         // the request budget spent on rows that can actually resolve.
         val rows = rawTracks.distinctBy(::rowIdentity)
         val limiter = Semaphore(SEARCH_CONCURRENCY)
+        val done = java.util.concurrent.atomic.AtomicInteger()
+        onProgress(MatchProgress(0, rows.size))
         val matched = coroutineScope {
             rows.map { raw ->
                 async {
@@ -62,7 +65,7 @@ class CsvPlaylistImporter @Inject constructor(
                         } catch (error: Exception) {
                             android.util.Log.w(TAG, "match failed for \"${raw.title}\"", error)
                             null
-                        }
+                        }.also { onProgress(MatchProgress(done.incrementAndGet(), rows.size)) }
                     }
                 }
             }.awaitAll()

@@ -946,6 +946,8 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    val matchProgress = playlistImportManager.matchProgress
+
     fun handleCsvPicked(uri: android.net.Uri) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             try {

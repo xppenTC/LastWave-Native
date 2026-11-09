@@ -82,6 +82,15 @@ class CsvPlaylistImporterTest {
         assertEquals("https://music.youtube.com/watch?v=12345678901", result.tracks.single().url)
     }
 
+    @Test
+    fun reportsProgressUntilEveryRowIsLookedUp() = runBlocking {
+        coEvery { api.searchSongs(any(), any(), any()) } returns listOf(track("12345678901", "Song", "Artist"))
+        val seen = java.util.Collections.synchronizedList(mutableListOf<MatchProgress>())
+        importer.parseAndMatchCsv("Track,Artist\nSong,Artist\nMissing,Artist".byteInputStream(), "songs.csv") { seen += it }
+        assertEquals(MatchProgress(0, 2), seen.first())
+        assertEquals(MatchProgress(2, 2), seen.maxByOrNull { it.done })
+    }
+
     /**
      * A single unclosed quote used to throw out of the parser, so one bad row
      * discarded every song in the file. Every row before it must survive.

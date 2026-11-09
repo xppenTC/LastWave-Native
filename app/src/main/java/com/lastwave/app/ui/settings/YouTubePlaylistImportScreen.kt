@@ -119,6 +119,7 @@ fun YouTubePlaylistImportScreen(
     viewModel: YouTubePlaylistImportViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val matchProgress by viewModel.matchProgress.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -595,6 +596,7 @@ fun YouTubePlaylistImportScreen(
                                         Text(stringResource(R.string.ytimp_select_file), fontWeight = FontWeight.Bold)
                                     }
                                 }
+                                matchProgress?.takeIf { state.isCsvImporting }?.let { ImportProgressBar(it) }
                             }
                         }
                     }

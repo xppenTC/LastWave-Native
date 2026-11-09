@@ -336,25 +336,33 @@ class SpotifyPlaylistImporter @Inject constructor(
     /**
      * Fetches and matches the user's Spotify Liked Songs to playable YouTube Music tracks.
      */
-    suspend fun fetchAndMatchLikedSongs(): ExternalImportResult = withContext(Dispatchers.IO) {
+    suspend fun fetchAndMatchLikedSongs(
+        onProgress: (MatchProgress) -> Unit = {},
+    ): ExternalImportResult = withContext(Dispatchers.IO) {
         val playlist = fetchLikedSongs()
-        matchRowsToTracks(playlist.rows, playlist.title)
+        matchRowsToTracks(playlist.rows, playlist.title, onProgress)
     }
 
     /**
      * Fetches the playlist and resolves every row to a playable YouTube Music
      * track, mirroring [CsvPlaylistImporter]'s bounded fan-out.
      */
-    suspend fun fetchAndMatch(urlOrId: String): ExternalImportResult = withContext(Dispatchers.IO) {
+    suspend fun fetchAndMatch(
+        urlOrId: String,
+        onProgress: (MatchProgress) -> Unit = {},
+    ): ExternalImportResult = withContext(Dispatchers.IO) {
         val playlist = fetchPlaylist(urlOrId)
-        matchRowsToTracks(playlist.rows, playlist.title)
+        matchRowsToTracks(playlist.rows, playlist.title, onProgress)
     }
 
     private suspend fun matchRowsToTracks(
         rows: List<ExternalTrackRow>,
         suggestedTitle: String,
+        onProgress: (MatchProgress) -> Unit,
     ): ExternalImportResult = coroutineScope {
         val limiter = Semaphore(4)
+        val done = java.util.concurrent.atomic.AtomicInteger()
+        onProgress(MatchProgress(0, rows.size))
         val tracks = rows.map { row ->
             async {
                 limiter.withPermit {
@@ -378,7 +386,7 @@ class SpotifyPlaylistImporter @Inject constructor(
                         throw e
                     } catch (_: Exception) {
                         null
-                    }
+                    }.also { onProgress(MatchProgress(done.incrementAndGet(), rows.size)) }
                 }
             }
         }.awaitAll().filterNotNull()
