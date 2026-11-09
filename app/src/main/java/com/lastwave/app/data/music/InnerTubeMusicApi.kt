@@ -4175,6 +4175,8 @@ class InnerTubeMusicApi @Inject constructor(
                     similarity(candidate.artist, cleanArtist) >= 35 ||
                     normalize(candidate.artist).contains(normalize(cleanArtist)) ||
                     normalize(cleanArtist).contains(normalize(candidate.artist)) ||
+                    // "P.L.L" is credited as "PLL".
+                    normalize(candidate.artist).replace(" ", "").contains(normalize(cleanArtist).replace(" ", "")) ||
                     normalize(candidate.title).contains(normalize(cleanArtist)))
         }
         val baseBest = validCandidates.asSequence()

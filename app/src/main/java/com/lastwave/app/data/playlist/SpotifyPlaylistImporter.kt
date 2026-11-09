@@ -33,6 +33,14 @@ import okhttp3.Request
 
 private const val TAG = "SpotifyImport"
 
+private val SPOTIFY_WITH_CREDIT = Regex("""(?i)\(with\s+""")
+private val SPOTIFY_DASH_TAIL = Regex("""^(.*\S)\s+-\s+([^-()]+)$""")
+
+/** Spotify writes "Song - Live" and "Song (with X)"; YouTube Music "Song (Live)" and "Song (feat. X)". */
+internal fun youTubeStyleTitle(title: String): String = title
+    .replace(SPOTIFY_WITH_CREDIT, "(feat. ")
+    .replace(SPOTIFY_DASH_TAIL, "$1 ($2)")
+
 /**
  * Reads the track list of a Spotify playlist and matches it to playable YouTube Music tracks.
  *
@@ -367,7 +375,7 @@ class SpotifyPlaylistImporter @Inject constructor(
             async {
                 limiter.withPermit {
                     try {
-                        val found = innerTube.findBestMatchOrNull(row.title, row.artist, prefetchStreams = false)
+                        val found = findMatch(row)
                         Log.d(
                             TAG,
                             if (found == null) "miss: ${row.title} | ${row.artist}"
@@ -469,7 +477,24 @@ class SpotifyPlaylistImporter @Inject constructor(
         rows = emptyList(),
     )
 
+    /**
+     * searchSongs folds rate limits into "no result" (see CsvPlaylistImporter), so a miss is
+     * retried. Same artist credit on every try: the loose artist check let "Paul Personne"
+     * alone accept "P. Paul Fenech".
+     */
+    private suspend fun findMatch(row: ExternalTrackRow): com.lastwave.app.data.music.YouTubeMusicTrack? {
+        val title = youTubeStyleTitle(row.title)
+        repeat(MATCH_ATTEMPTS) { attempt ->
+            if (attempt > 0) delay(MATCH_RETRY_BACKOFF_MS * attempt)
+            innerTube.findBestMatchOrNull(title, row.artist, prefetchStreams = false)?.let { return it }
+        }
+        return null
+    }
+
     private companion object {
+        const val MATCH_ATTEMPTS = 3
+        const val MATCH_RETRY_BACKOFF_MS = 1_000L
+
         const val PATHFINDER_ENDPOINT = "https://api-partner.spotify.com/pathfinder/v1/query"
         const val HASH_FETCH_PLAYLIST = "21ea11a6ac75a5f3e01fd365d29c18e0a4a8b7dc09f89bbb5d73910190c6acaf"
         const val HASH_LIBRARY_V3 = "390c78e5b951029bad359785e69b07b536a509c581cbcd0aded5e5067f187455"
