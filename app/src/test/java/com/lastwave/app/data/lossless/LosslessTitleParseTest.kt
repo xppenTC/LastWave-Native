@@ -62,4 +62,29 @@ class LosslessTitleParseTest {
         val parts = LosslessMusicApi.parseTitle("Dil Ho Tum | Hindi Love song", "Rishi Kumar")
         assertTrue("hindi" !in parts.versions)
     }
+
+    @Test
+    fun `spotify head-is-title reading matches the tidal title`() {
+        // Spotify liked songs that fell back to Opus: title, artist, Spotify album, Tidal title.
+        val cases = listOf(
+            listOf("Help! - Remastered 2009", "The Beatles", "Help! (Remastered 2009)", "Help! (Remastered 2009)"),
+            listOf("Meditation - Crazy We R Remix", "Le Son Vert, Crazy We R", "Meditation (Remixes)", "Meditation (Crazy We R Remix)"),
+            listOf("Fleurs Fanées - Version acoustique", "Candice", "Fleurs Fanées (Version acoustique)", "Fleurs Fanées (Version Acoustique)"),
+            listOf("Reggae Sun Scoop - Official 2014 Anthem", "Naâman, Fatbabs, SunSka", "REGGAE SUN SCOOP (Reggae Sun Ska nthem)", "Reggae Sun Scoop (Official 2014 Anthem)"),
+            listOf("Le téléphone céllulaire - Ne m'appelle plus", "Les clopes", "Les clopes", "Le téléphone céllulaire (Ne m'appelle plus)"),
+        )
+        val wrong = cases.mapNotNull { (title, artist, album, tidal) ->
+            val wanted = LosslessMusicApi.parseTitle(title, artist, album, headIsTitle = true)
+            val got = LosslessMusicApi.parseTitle(tidal, artist)
+            if (wanted.core == got.core && wanted.versions == got.versions) null
+            else "'$title' -> ${wanted.core} ${wanted.versions} vs ${got.core} ${got.versions}"
+        }
+        assertTrue(wrong.joinToString("\n"), wrong.isEmpty())
+    }
+
+    @Test
+    fun `head-is-title reading still drops a leading artist`() {
+        val parts = LosslessMusicApi.parseTitle("Arijit Singh - Kesariya", "Arijit Singh", headIsTitle = true)
+        assertEquals("kesariya", parts.core)
+    }
 }

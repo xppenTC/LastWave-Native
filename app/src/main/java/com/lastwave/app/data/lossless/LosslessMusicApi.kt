@@ -524,7 +524,8 @@ class LosslessMusicApi @Inject constructor(
                 .trim()
         }
 
-        fun parseTitle(raw: String, artist: String = "", album: String? = null): TitleParts {
+        /** [headIsTitle]: read "Head - Tail" as Spotify does ("Help! - Remastered 2009") unless the head is the artist. */
+        fun parseTitle(raw: String, artist: String = "", album: String? = null, headIsTitle: Boolean = false): TitleParts {
             val versions = sortedSetOf<String>()
             val context = mutableSetOf<String>()
             var text = raw.lowercase(Locale.ROOT)
@@ -581,7 +582,10 @@ class LosslessMusicApi @Inject constructor(
                 val tail = text.substring(dash.range.last + 1).trim()
                 if (head.isBlank() || tail.isBlank()) return@repeat
 
-                if (isArtistOrAlbumName(head, artist, album)) {
+                if (headIsTitle && !isArtistOrAlbumName(head, artist, null)) {
+                    classifySegment(tail, versions, context)
+                    text = head
+                } else if (isArtistOrAlbumName(head, artist, album)) {
                     classifySegment(head, versions, context)
                     text = tail
                 } else if (isArtistOrAlbumName(tail, artist, album)) {
@@ -985,6 +989,10 @@ class LosslessMusicApi @Inject constructor(
         val cleanTitle = cleanForSearch(title).ifBlank { title }
         val parsedTarget = parseTitle(title, cleanArtist, expectedAlbum)
         val searchableTitle = (parsedTarget.words + parsedTarget.versions).joinToString(" ").ifBlank { cleanTitle }
+        val headTitle = parseTitle(title, cleanArtist, expectedAlbum, headIsTitle = true)
+            .let { (it.words + it.versions).joinToString(" ") }
+        // Tidal needs "Don't", not "dont"; a " - " in a query returns nothing.
+        val punctuatedTitle = cleanTitle.replace(Regex("""\s*[-–—:|]+\s*"""), " ")
 
         val artistList = cleanArtist.split(ARTIST_SEPARATORS)
             .map { cleanForSearch(it) }
@@ -994,11 +1002,13 @@ class LosslessMusicApi @Inject constructor(
 
         val queries = listOfNotNull(
             if (primaryArtist.isNotBlank()) "$searchableTitle $primaryArtist".trim() else null,
+            if (primaryArtist.isNotBlank()) "$headTitle $primaryArtist".trim() else null,
+            if (primaryArtist.isNotBlank()) "$punctuatedTitle $primaryArtist".trim() else null,
             if (secondaryArtist.isNotBlank()) "$searchableTitle $secondaryArtist".trim() else null,
             searchableTitle.trim(),
             if (cleanArtist.isNotBlank() && cleanArtist != primaryArtist) "$searchableTitle $cleanArtist".trim() else null,
             if (parsedTarget.core.length >= 4) foldTransliteration(searchableTitle).trim() else null,
-        ).filter { it.isNotBlank() }.distinct()
+        ).filter { it.isNotBlank() }.distinctBy { it.lowercase(Locale.ROOT) }
 
         val qualityParam = when (preferredQuality) {
             QUALITY_DOLBY_ATMOS -> "lossless"
@@ -1448,8 +1458,12 @@ class LosslessMusicApi @Inject constructor(
         expectedAlbum: String?,
     ): Int? {
         val matchArtist = cleanForSearch(artist).ifBlank { artist }
-        val wanted = parseTitle(title, matchArtist, expectedAlbum)
         val got = parseTitle(item.title, item.performerName, item.albumTitle)
+        // "Movie - Song" (YouTube) and "Song - Remix" (Spotify) look alike: when the usual reading misses, try the head as the title.
+        val usualReading = parseTitle(title, matchArtist, expectedAlbum)
+        val wanted = usualReading.takeIf { it.core == got.core }
+            ?: parseTitle(title, matchArtist, expectedAlbum, headIsTitle = true).takeIf { it.core == got.core }
+            ?: usualReading
         if (wanted.core.isBlank() || got.core.isBlank()) return null
 
         // 1. Version agreement: asking for original must never land on remix, live, acoustic, karaoke, etc.
