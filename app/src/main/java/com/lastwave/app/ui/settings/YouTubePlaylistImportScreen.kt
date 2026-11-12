@@ -103,6 +103,7 @@ import com.lastwave.app.data.music.YouTubePlaylistSummary
 import com.lastwave.app.data.playlist.SavedPlaylist
 import com.lastwave.app.ui.common.ArtworkImage
 import com.lastwave.app.ui.common.ExpressiveHeader
+import com.lastwave.app.ui.common.GlassHeaderLayout
 import com.lastwave.app.ui.common.groupPositionFor
 import com.lastwave.app.ui.common.groupShape
 import com.lastwave.app.ui.common.safeDrawingBottomPadding
@@ -151,13 +152,15 @@ fun YouTubePlaylistImportScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-        Column(
+        GlassHeaderLayout(
             modifier = Modifier
                 .fillMaxSize()
                 .adaptiveContentWidth(maxWidth = 860.dp)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
-        ) {
+            header = { headerModifier, headerBackdrop ->
             ExpressiveHeader(
+                modifier = headerModifier,
+                backdrop = headerBackdrop,
                 title = stringResource(R.string.ytimp_title),
                 subtitle = stringResource(R.string.ytimp_sub),
                 onBack = onBack,
@@ -177,6 +180,9 @@ fun YouTubePlaylistImportScreen(
                     }
                 },
             )
+            },
+        ) { headerInset ->
+        Column(Modifier.fillMaxSize().padding(top = headerInset)) {
 
             // Segmented Tab Selector with Vector Icons
             Surface(
@@ -621,6 +627,7 @@ fun YouTubePlaylistImportScreen(
                 }
             }
         }
+        }
 
         // Floating Bottom Import CTA (for multi-select on library & search tabs)
         AnimatedVisibility(
@@ -679,9 +686,10 @@ fun YouTubePlaylistImportScreen(
     state.previewPlaylist?.let { preview ->
         PlaylistPreviewModal(
             preview = preview,
+            isImporting = state.isImporting,
             onDismiss = { viewModel.dismissPreview() },
             onImportThis = {
-                viewModel.importSelected { savedList ->
+                viewModel.importPreview { savedList ->
                     viewModel.dismissPreview()
                     onImportSuccess(savedList)
                 }
@@ -766,6 +774,7 @@ private fun YouTubePlaylistCard(
 @Composable
 private fun PlaylistPreviewModal(
     preview: YouTubePlaylistResult,
+    isImporting: Boolean,
     onDismiss: () -> Unit,
     onImportThis: () -> Unit,
 ) {
@@ -862,6 +871,7 @@ private fun PlaylistPreviewModal(
 
             Button(
                 onClick = onImportThis,
+                enabled = !isImporting,
                 shape = CircleShape,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -869,7 +879,11 @@ private fun PlaylistPreviewModal(
             ) {
                 Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.ytimp_import_btn, preview.title), fontWeight = FontWeight.Bold)
+                Text(
+                    if (isImporting) stringResource(R.string.ytimp_importing)
+                    else stringResource(R.string.ytimp_import_btn, preview.title),
+                    fontWeight = FontWeight.Bold,
+                )
             }
         }
     }

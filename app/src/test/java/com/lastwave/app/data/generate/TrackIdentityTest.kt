@@ -4,6 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.lastwave.app.data.playlist.isLikedIn
+import com.lastwave.app.data.playlist.likedMarkers
 
 /**
  * Regression tests for Liked Songs duplication: the same song arrived with a
@@ -86,10 +88,10 @@ class TrackIdentityTest {
         val liked = GeneratedTrack(name = "BAILANDO", artist = "Unicorn on K", url = "dQw4w9WgXcQ")
         // The same video playing under YouTube's own title.
         val playing = GeneratedTrack(name = "Bailando (Official Video)", artist = "Unicorn on K - Topic", url = "dQw4w9WgXcQ")
-        val keys = liked.likeKeys().toSet()
+        val keys = liked.likedMarkers().toSet()
         assertTrue(playing.sameSongAs(liked))
-        assertTrue(playing.likedIn(keys))
-        assertTrue(GeneratedTrack(name = "bailando", artist = "unicorn on k").likedIn(keys))
-        assertFalse(GeneratedTrack(name = "Other", artist = "Unicorn on K").likedIn(keys))
+        assertTrue(playing.isLikedIn(keys))
+        assertTrue(GeneratedTrack(name = "bailando", artist = "unicorn on k").isLikedIn(keys))
+        assertFalse(GeneratedTrack(name = "Other", artist = "Unicorn on K").isLikedIn(keys))
     }
 }

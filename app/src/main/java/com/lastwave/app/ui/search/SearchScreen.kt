@@ -102,6 +102,7 @@ import coil.compose.AsyncImage
 import com.lastwave.app.data.search.SearchResultItem
 import com.lastwave.app.data.search.SearchTab
 import com.lastwave.app.ui.common.ArtworkImage
+import com.lastwave.app.ui.common.ArtworkViewModel
 import com.lastwave.app.ui.common.ExpressiveMotion
 import com.lastwave.app.ui.common.HeaderActionIcon
 import com.lastwave.app.ui.common.TrackContextMenuSheet
@@ -150,9 +151,11 @@ fun SearchScreen(
     viewModel: SearchViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val artworkViewModel: ArtworkViewModel = hiltViewModel()
     val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
     val playbackState by musicPlayer.listPlaybackState.collectAsStateWithLifecycle()
     var menuTarget by remember { mutableStateOf<TrackMenuTarget?>(null) }
+    var menuPlayableTrack by remember { mutableStateOf<com.lastwave.app.playback.PlayableTrack?>(null) }
     // Long-press (deep press) on a TRACKS row opens the mini tray;
     // the overflow button keeps the full sheet.
     var miniTrayItem by remember { mutableStateOf<SearchResultItem?>(null) }
@@ -281,6 +284,7 @@ fun SearchScreen(
                                             text = when (state.tab) {
                                                 SearchTab.USERS -> stringResource(R.string.search_hint_users)
                                                 SearchTab.GAMES -> stringResource(R.string.khinsider_search_hint)
+                                                SearchTab.LOCAL -> stringResource(R.string.search_hint_local)
                                                 else -> stringResource(R.string.search_hint_yt)
                                             },
                                             style = MaterialTheme.typography.bodyMedium,
@@ -593,7 +597,7 @@ fun SearchScreen(
                                     ),
                                 ) {
                                     if (topResult != null && state.tab != SearchTab.USERS) {
-                                        val isTopPlaying = (state.tab == SearchTab.TRACKS || state.tab == SearchTab.PODCASTS) && playbackState.isPlaying &&
+                                        val isTopPlaying = (state.tab == SearchTab.TRACKS || state.tab == SearchTab.LOCAL || state.tab == SearchTab.PODCASTS) && playbackState.isPlaying &&
                                             playbackState.current?.title.equals(topResult.name, ignoreCase = true) &&
                                             (topResult.artist.isNullOrBlank() || playbackState.current?.artist.equals(topResult.artist, ignoreCase = true))
 
@@ -614,14 +618,10 @@ fun SearchScreen(
                                                     }
                                                 },
                                                 onLongClick = {
-                                                    if (state.tab == SearchTab.TRACKS) miniTrayItem = topResult
-                                                },
-                                                onMenu = {
-                                                    menuTarget = when (state.tab) {
-                                                        SearchTab.TRACKS, SearchTab.PODCASTS -> TrackMenuTarget.Track(topResult.name, topResult.artist.orEmpty(), topResult.url)
-                                                        SearchTab.ARTISTS -> TrackMenuTarget.Artist(topResult.name, topResult.url)
-                                                        SearchTab.ALBUMS -> TrackMenuTarget.Album(topResult.name, topResult.artist.orEmpty(), topResult.url)
-                                                        SearchTab.PLAYLISTS, SearchTab.USERS, SearchTab.GAMES -> null
+                                                    if (state.tab == SearchTab.TRACKS ||
+                                                        (state.tab == SearchTab.LOCAL && topResult.entityId?.startsWith("offline_playlist:") != true)
+                                                    ) {
+                                                        miniTrayItem = topResult
                                                     }
                                                 },
                                             )
@@ -635,7 +635,7 @@ fun SearchScreen(
                                         key = { index, item -> "${item.entityId ?: item.url.ifBlank { "${item.name}_${item.artist.orEmpty()}" }}_$index" },
                                         contentType = { _, _ -> "search_result" },
                                     ) { _, item ->
-                                        val isItemPlaying = (state.tab == SearchTab.TRACKS || state.tab == SearchTab.PODCASTS) && playbackState.isPlaying &&
+                                        val isItemPlaying = (state.tab == SearchTab.TRACKS || state.tab == SearchTab.LOCAL || state.tab == SearchTab.PODCASTS) && playbackState.isPlaying &&
                                             playbackState.current?.title.equals(item.name, ignoreCase = true) &&
                                             (item.artist.isNullOrBlank() || playbackState.current?.artist.equals(item.artist, ignoreCase = true))
 
@@ -655,13 +655,18 @@ fun SearchScreen(
                                                 }
                                             },
                                             onLongClick = {
-                                                if (state.tab == SearchTab.TRACKS) {
+                                                if (state.tab == SearchTab.TRACKS ||
+                                                    (state.tab == SearchTab.LOCAL && item.entityId?.startsWith("offline_playlist:") != true)
+                                                ) {
                                                     miniTrayItem = item
                                                 }
                                             },
                                             onMenu = {
+                                                menuPlayableTrack = if (state.tab == SearchTab.TRACKS || state.tab == SearchTab.LOCAL || state.tab == SearchTab.PODCASTS) {
+                                                    item.toPlayableTrack(podcast = state.tab == SearchTab.PODCASTS)
+                                                } else null
                                                 menuTarget = when (state.tab) {
-                                                    SearchTab.TRACKS, SearchTab.PODCASTS -> TrackMenuTarget.Track(item.name, item.artist.orEmpty(), item.url)
+                                                    SearchTab.TRACKS, SearchTab.LOCAL, SearchTab.PODCASTS -> TrackMenuTarget.Track(item.name, item.artist.orEmpty(), item.url)
                                                     SearchTab.ARTISTS -> TrackMenuTarget.Artist(item.name, item.url)
                                                     SearchTab.ALBUMS -> TrackMenuTarget.Album(item.name, item.artist.orEmpty(), item.url)
                                                     SearchTab.PLAYLISTS, SearchTab.USERS, SearchTab.GAMES -> null
@@ -697,8 +702,12 @@ fun SearchScreen(
     menuTarget?.let { target ->
         TrackContextMenuSheet(
             target = target,
+            playableTrack = menuPlayableTrack,
             capabilities = TrackMenuCapabilities(showCopyActions = true, showDeleteScrobble = state.tab != SearchTab.PODCASTS),
             playbackSourceLabel = "Search",
+            onRefreshArtwork = (target as? TrackMenuTarget.Track)?.let { trackTarget ->
+                { artworkViewModel.refresh(trackTarget.name, trackTarget.artist) }
+            },
             onDismiss = { menuTarget = null },
         )
     }
@@ -711,6 +720,7 @@ fun SearchScreen(
                 album = item.subtitle,
                 artworkUrl = item.artworkUrl,
                 videoId = item.videoId,
+                durationMs = item.durationMs,
                 sourceLabel = "Search",
                 onPlay = { viewModel.playResult(item) },
             ),
@@ -727,7 +737,6 @@ private fun TopResultCard(
     tab: SearchTab,
     isPlaying: Boolean = false,
     onPlay: () -> Unit,
-    onMenu: () -> Unit,
     onLongClick: (() -> Unit)? = null,
 ) {
     val shape = RoundedCornerShape(20.dp)
@@ -767,6 +776,11 @@ private fun TopResultCard(
         ) {
             val fallback = when (tab) {
                 SearchTab.TRACKS -> if (isPlaying) Icons.Filled.GraphicEq else Icons.Filled.MusicNote
+                SearchTab.LOCAL -> when {
+                    isPlaying -> Icons.Filled.GraphicEq
+                    item.entityId?.startsWith("offline_playlist:") == true -> Icons.AutoMirrored.Filled.QueueMusic
+                    else -> Icons.Filled.MusicNote
+                }
                 SearchTab.PODCASTS -> if (isPlaying) Icons.Filled.GraphicEq else Icons.Filled.Mic
                 SearchTab.ARTISTS -> Icons.Filled.Person
                 SearchTab.ALBUMS -> Icons.Filled.Album
@@ -802,6 +816,7 @@ private fun TopResultCard(
                     Text(
                         when (tab) {
                             SearchTab.TRACKS -> "TOP SONG"
+                            SearchTab.LOCAL -> "LOCAL MATCH"
                             SearchTab.PODCASTS -> "TOP PODCAST"
                             SearchTab.ARTISTS -> "TOP ARTIST"
                             SearchTab.ALBUMS -> "TOP ALBUM"
@@ -824,6 +839,7 @@ private fun TopResultCard(
                 )
                 val subtitle = when (tab) {
                     SearchTab.TRACKS -> item.artist.orEmpty()
+                    SearchTab.LOCAL -> listOfNotNull(item.artist, item.subtitle).distinct().joinToString(" • ")
                     SearchTab.PODCASTS -> listOfNotNull(item.artist, item.subtitle).distinct().joinToString(" • ")
                     SearchTab.ALBUMS -> item.artist.orEmpty()
                     SearchTab.PLAYLISTS -> item.subtitle.orEmpty()
@@ -1052,7 +1068,7 @@ private fun SearchResultRow(
                 enabled = tab != SearchTab.USERS,
                 onClick = onClick,
                 onLongClick = when (tab) {
-                    SearchTab.TRACKS -> onLongClick
+                    SearchTab.TRACKS, SearchTab.LOCAL -> onLongClick
                     SearchTab.GAMES -> null
                     else -> onMenu
                 },
@@ -1062,6 +1078,11 @@ private fun SearchResultRow(
     ) {
         val fallback = when (tab) {
             SearchTab.TRACKS -> if (isPlaying) Icons.Filled.GraphicEq else Icons.Filled.MusicNote
+            SearchTab.LOCAL -> when {
+                isPlaying -> Icons.Filled.GraphicEq
+                item.entityId?.startsWith("offline_playlist:") == true -> Icons.AutoMirrored.Filled.QueueMusic
+                else -> Icons.Filled.MusicNote
+            }
             SearchTab.PODCASTS -> if (isPlaying) Icons.Filled.GraphicEq else Icons.Filled.Mic
             SearchTab.ARTISTS -> Icons.Filled.Person
             SearchTab.ALBUMS -> Icons.Filled.Album
@@ -1094,6 +1115,7 @@ private fun SearchResultRow(
             )
             val subtitle = when (tab) {
                 SearchTab.TRACKS -> listOfNotNull(item.artist, item.subtitle).joinToString(" \u2022 ")
+                SearchTab.LOCAL -> listOfNotNull(item.artist, item.subtitle).distinct().joinToString(" \u2022 ")
                 SearchTab.PODCASTS -> listOfNotNull(item.artist, item.subtitle).distinct().joinToString(" \u2022 ")
                 SearchTab.ALBUMS -> item.subtitle ?: item.artist.orEmpty()
                 SearchTab.PLAYLISTS -> item.subtitle.orEmpty()
@@ -1112,7 +1134,7 @@ private fun SearchResultRow(
             IconButton(onClick = { openLastFm("/+removefriend") }) {
                 Icon(Icons.Filled.PersonRemove, contentDescription = stringResource(R.string.search_unfollow_cd, item.name))
             }
-        } else if (tab != SearchTab.PLAYLISTS && tab != SearchTab.GAMES) {
+        } else if (tab != SearchTab.PLAYLISTS && tab != SearchTab.GAMES && item.entityId?.startsWith("offline_playlist:") != true) {
             com.lastwave.app.ui.common.OverflowMenuButton(onClick = onMenu)
         }
     }
@@ -1126,6 +1148,7 @@ private fun SearchFilterPills(
 ) {
     val tabs = listOf(
         SearchTab.TRACKS to R.string.search_tab_tracks,
+        SearchTab.LOCAL to R.string.search_tab_local,
         SearchTab.PODCASTS to R.string.search_tab_podcasts,
         SearchTab.ARTISTS to R.string.search_tab_artists,
         SearchTab.ALBUMS to R.string.search_tab_albums,

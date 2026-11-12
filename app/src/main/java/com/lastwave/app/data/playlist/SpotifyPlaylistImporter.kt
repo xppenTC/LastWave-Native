@@ -15,6 +15,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
@@ -128,6 +130,9 @@ class SpotifyPlaylistImporter @Inject constructor(
             if (apiResult != null && apiResult.rows.isNotEmpty()) {
                 return@withContext apiResult
             }
+            Log.w(TAG, "Authenticated fetch returned no tracks for $id; using public embed fallback")
+        } else {
+            Log.w(TAG, "No Spotify personal token; using public embed fallback (max ~100 tracks)")
         }
 
         // Fallback to public embed page scraping
@@ -158,12 +163,9 @@ class SpotifyPlaylistImporter @Inject constructor(
         while (offset < totalCount && pages < MAX_PAGES) {
             pages++
             val variables = """{"uri":"spotify:playlist:$id","offset":$offset,"limit":100,"enableWatchFeedEntrypoint":false}"""
-            val extensions = """{"persistedQuery":{"version":1,"sha256Hash":"$HASH_FETCH_PLAYLIST"}}"""
-            val url = "$PATHFINDER_ENDPOINT?operationName=fetchPlaylist&variables=${Uri.encode(variables)}&extensions=${Uri.encode(extensions)}"
-
             // A first-page failure falls back to the public embed page; a later one
             // must not quietly cut the playlist short.
-            val body = pathfinderGet(url, token, clientToken)
+            val body = pathfinderGet("fetchPlaylist", variables, HASH_FETCH_PLAYLIST, token, clientToken)
                 ?: if (pages == 1) return null else throw stoppedAfter(rows.size, totalCount)
             if (body.isBlank()) break
 
@@ -208,75 +210,189 @@ class SpotifyPlaylistImporter @Inject constructor(
         }
 
         if (rows.isEmpty()) return null
-        return ExternalPlaylistResult(
-            source = ExternalPlaylistSource.SPOTIFY,
-            title = title,
-            author = author,
-            artworkUrl = artworkUrl,
-            rows = rows,
-        )
+        return buildResult(title, author, artworkUrl, rows)
+    }
+
+    private fun buildResult(
+        title: String,
+        author: String?,
+        artworkUrl: String?,
+        rows: List<ExternalTrackRow>,
+    ) = ExternalPlaylistResult(
+        source = ExternalPlaylistSource.SPOTIFY,
+        title = title,
+        author = author,
+        artworkUrl = artworkUrl,
+        rows = rows,
+    )
+
+    /**
+     * Single hardened Pathfinder GET: retries transient failures (IO errors, 429, 5xx)
+     * with backoff, logs every non-success status and GraphQL-level error (stale
+     * persisted-query hash, expired token) instead of silently yielding "empty",
+     * and returns null only after all attempts fail.
+     */
+    private suspend fun pathfinderGet(
+        operation: String,
+        variables: String,
+        hash: String,
+        token: String,
+        clientToken: String?,
+    ): String? {
+        val extensions = """{"persistedQuery":{"version":1,"sha256Hash":"$hash"}}"""
+        val url = "$PATHFINDER_ENDPOINT?operationName=$operation&variables=${Uri.encode(variables)}&extensions=${Uri.encode(extensions)}"
+        val request = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer $token")
+            .header("User-Agent", DESKTOP_USER_AGENT)
+            .header("Accept", "application/json")
+            .apply { if (!clientToken.isNullOrBlank()) header("Client-Token", clientToken) }
+            .build()
+        repeat(PATHFINDER_ATTEMPTS) { attempt ->
+            var retryAfterSec: Long? = null
+            val retry = try {
+                client.newCall(request).execute().use { response ->
+                    val code = response.code
+                    if (response.isSuccessful) {
+                        val body = response.body?.string().orEmpty()
+                        if (body.contains("PersistedQueryNotFound") || body.contains("\"errors\"")) {
+                            Log.w(TAG, "$operation returned GraphQL errors: ${body.take(200)}")
+                        }
+                        return body
+                    }
+                    Log.w(TAG, "$operation failed HTTP $code (attempt ${attempt + 1}/$PATHFINDER_ATTEMPTS)")
+                    retryAfterSec = response.header("Retry-After")?.toLongOrNull()
+                    code == 429 || code >= 500
+                }
+            } catch (e: IOException) {
+                Log.w(TAG, "$operation I/O error (attempt ${attempt + 1}): ${e.message}")
+                true
+            }
+            if (!retry) return null
+            // Spotify rate-limits long liked-song walks: honour Retry-After, else back off 1-8 s.
+            if (attempt < PATHFINDER_ATTEMPTS - 1) {
+                delay(((retryAfterSec ?: 0) * 1000).coerceIn(1000L shl attempt, 15_000L))
+            }
+        }
+        return null
     }
 
     /**
      * Fetches playlists from the connected Spotify account library via Pathfinder.
+     *
+     * Spotify's `libraryV3` list query omits per-playlist track counts (`content.totalCount`),
+     * so any playlist missing a summary count is resolved via a lightweight `fetchPlaylist`
+     * (`limit=1`) query instead of defaulting to 0.
      */
     suspend fun fetchUserPlaylists(): List<SpotifyUserPlaylist> = withContext(Dispatchers.IO) {
         val token = spotifyAuthRepository.getPersonalToken() ?: return@withContext emptyList()
         val clientToken = spotifyAuthRepository.getClientToken()
         try {
             val variables = """{"filters":["Playlists"],"order":null,"textFilter":null,"features":[],"limit":50,"offset":0,"flatten":false,"expandedFolders":[],"folderUri":null,"includeFoldersWhenFlattening":true}"""
-            val extensions = """{"persistedQuery":{"version":1,"sha256Hash":"$HASH_LIBRARY_V3"}}"""
-            val url = "$PATHFINDER_ENDPOINT?operationName=libraryV3&variables=${Uri.encode(variables)}&extensions=${Uri.encode(extensions)}"
+            val body = pathfinderGet("libraryV3", variables, HASH_LIBRARY_V3, token, clientToken)
+                ?: return@withContext emptyList()
+            val playlists = parseUserPlaylists(body)
+            if (playlists.none { it.trackCount == null }) return@withContext playlists
 
-            val reqBuilder = Request.Builder()
-                .url(url)
-                .header("Authorization", "Bearer $token")
-                .header("User-Agent", DESKTOP_USER_AGENT)
-                .header("Accept", "application/json")
-            if (!clientToken.isNullOrBlank()) {
-                reqBuilder.header("Client-Token", clientToken)
-            }
-
-            client.newCall(reqBuilder.build()).execute().use { response ->
-                if (!response.isSuccessful) return@use emptyList()
-                val body = response.body?.string().orEmpty()
-                val root = json.parseToJsonElement(body).jsonObject
-                val libraryItems = root["data"]?.jsonObject?.get("me")?.jsonObject
-                    ?.get("libraryV3")?.jsonObject?.get("items")?.jsonArray.orEmpty()
-
-                libraryItems.mapNotNull { itemElement ->
-                    val obj = itemElement as? JsonObject ?: return@mapNotNull null
-                    val itemWrapper = obj["item"] as? JsonObject ?: return@mapNotNull null
-                    val typename = itemWrapper["__typename"]?.jsonPrimitive?.contentOrNull
-                    if (typename != "PlaylistResponseWrapper") return@mapNotNull null
-
-                    val plData = itemWrapper["data"] as? JsonObject ?: return@mapNotNull null
-                    val uri = plData["uri"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-                    val id = uri.removePrefix("spotify:playlist:")
-                    if (id.isBlank()) return@mapNotNull null
-
-                    val name = plData["name"]?.jsonPrimitive?.contentOrNull ?: "Spotify Playlist"
-                    val desc = plData["description"]?.jsonPrimitive?.contentOrNull
-                    val img = plData["images"]?.jsonObject?.get("items")?.jsonArray?.firstOrNull()
-                        ?.jsonObject?.get("sources")?.jsonArray?.firstOrNull()
-                        ?.jsonObject?.get("url")?.jsonPrimitive?.contentOrNull
-                    val count = plData["content"]?.jsonObject?.get("totalCount")?.jsonPrimitive?.intOrNull
-                        ?: plData["tracks"]?.jsonObject?.get("total")?.jsonPrimitive?.intOrNull
-                        ?: 0
-
-                    SpotifyUserPlaylist(
-                        id = id,
-                        name = name,
-                        description = desc,
-                        artworkUrl = img,
-                        trackCount = count,
-                    )
-                }
+            val semaphore = Semaphore(USER_PLAYLIST_COUNT_CONCURRENCY)
+            coroutineScope {
+                playlists.map { pl ->
+                    if (pl.trackCount != null) {
+                        async { pl }
+                    } else {
+                        async {
+                            val count = semaphore.withPermit {
+                                fetchPlaylistTrackCount(pl.id, token, clientToken)
+                            }
+                            if (count != null) pl.copy(trackCount = count) else pl
+                        }
+                    }
+                }.awaitAll()
             }
         } catch (e: Exception) {
+            currentCoroutineContext().ensureActive()
             Log.w(TAG, "Failed to fetch user Spotify playlists: ${e.message}")
             emptyList()
         }
+    }
+
+    /**
+     * Fetches only the total count of the user's Spotify Liked Songs collection.
+     */
+    suspend fun fetchLikedSongsCount(): Int? = withContext(Dispatchers.IO) {
+        val token = spotifyAuthRepository.getPersonalToken() ?: return@withContext null
+        val clientToken = spotifyAuthRepository.getClientToken()
+        try {
+            val variables = """{"offset":0,"limit":1}"""
+            val body = pathfinderGet("fetchLibraryTracks", variables, HASH_FETCH_LIBRARY_TRACKS, token, clientToken)
+                ?: return@withContext null
+            parseLikedSongsTotalCount(body)
+        } catch (e: Exception) {
+            currentCoroutineContext().ensureActive()
+            Log.w(TAG, "Failed to fetch Spotify Liked Songs count: ${e.message}")
+            null
+        }
+    }
+
+    private suspend fun fetchPlaylistTrackCount(id: String, token: String, clientToken: String?): Int? {
+        val variables = """{"uri":"spotify:playlist:$id","offset":0,"limit":1,"enableWatchFeedEntrypoint":false}"""
+        val body = pathfinderGet("fetchPlaylist", variables, HASH_FETCH_PLAYLIST, token, clientToken) ?: return null
+        return parsePlaylistTotalCount(body)
+    }
+
+    internal fun parseUserPlaylists(body: String): List<SpotifyUserPlaylist> {
+        if (body.isBlank()) return emptyList()
+        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return emptyList()
+        val libraryItems = root["data"]?.jsonObject?.get("me")?.jsonObject
+            ?.get("libraryV3")?.jsonObject?.get("items")?.jsonArray.orEmpty()
+
+        return libraryItems.mapNotNull { itemElement ->
+            val obj = itemElement as? JsonObject ?: return@mapNotNull null
+            val itemWrapper = obj["item"] as? JsonObject ?: return@mapNotNull null
+            val plData = itemWrapper["data"] as? JsonObject ?: return@mapNotNull null
+            val typename = itemWrapper["__typename"]?.jsonPrimitive?.contentOrNull
+                ?: plData["__typename"]?.jsonPrimitive?.contentOrNull
+            if (typename != "PlaylistResponseWrapper") return@mapNotNull null
+
+            val uri = plData["uri"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            val id = uri.removePrefix("spotify:playlist:")
+            if (id.isBlank()) return@mapNotNull null
+
+            val name = plData["name"]?.jsonPrimitive?.contentOrNull ?: "Spotify Playlist"
+            val desc = plData["description"]?.jsonPrimitive?.contentOrNull
+            val img = plData["images"]?.jsonObject?.get("items")?.jsonArray?.firstOrNull()
+                ?.jsonObject?.get("sources")?.jsonArray?.firstOrNull()
+                ?.jsonObject?.get("url")?.jsonPrimitive?.contentOrNull
+
+            SpotifyUserPlaylist(
+                id = id,
+                name = name,
+                description = desc,
+                artworkUrl = img,
+                trackCount = extractLibraryPlaylistCount(plData),
+            )
+        }
+    }
+
+    private fun extractLibraryPlaylistCount(plData: JsonObject): Int? =
+        plData["content"]?.jsonObject?.get("totalCount")?.jsonPrimitive?.intOrNull
+            ?: plData["tracks"]?.jsonObject?.get("totalCount")?.jsonPrimitive?.intOrNull
+            ?: plData["tracks"]?.jsonObject?.get("total")?.jsonPrimitive?.intOrNull
+            ?: plData["totalCount"]?.jsonPrimitive?.intOrNull
+
+    internal fun parsePlaylistTotalCount(body: String): Int? {
+        if (body.isBlank()) return null
+        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return null
+        return root["data"]?.jsonObject?.get("playlistV2")?.jsonObject
+            ?.get("content")?.jsonObject?.get("totalCount")?.jsonPrimitive?.intOrNull
+    }
+
+    internal fun parseLikedSongsTotalCount(body: String): Int? {
+        if (body.isBlank()) return null
+        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return null
+        return root["data"]?.jsonObject?.get("me")?.jsonObject
+            ?.get("library")?.jsonObject?.get("tracks")?.jsonObject
+            ?.get("totalCount")?.jsonPrimitive?.intOrNull
     }
 
     /**
@@ -295,10 +411,7 @@ class SpotifyPlaylistImporter @Inject constructor(
         while (offset < totalCount && pages < MAX_PAGES) {
             pages++
             val variables = """{"offset":$offset,"limit":50}"""
-            val extensions = """{"persistedQuery":{"version":1,"sha256Hash":"$HASH_FETCH_LIBRARY_TRACKS"}}"""
-            val url = "$PATHFINDER_ENDPOINT?operationName=fetchLibraryTracks&variables=${Uri.encode(variables)}&extensions=${Uri.encode(extensions)}"
-
-            val body = pathfinderGet(url, token, clientToken)
+            val body = pathfinderGet("fetchLibraryTracks", variables, HASH_FETCH_LIBRARY_TRACKS, token, clientToken)
                 ?: if (pages == 1) break else throw stoppedAfter(rows.size, totalCount)
 
             val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: break
@@ -409,34 +522,6 @@ class SpotifyPlaylistImporter @Inject constructor(
         )
     }
 
-    /** One Pathfinder GET, retried on rate limits and server or network errors; null once it keeps failing. */
-    private suspend fun pathfinderGet(url: String, token: String, clientToken: String?): String? {
-        val request = Request.Builder()
-            .url(url)
-            .header("Authorization", "Bearer $token")
-            .header("User-Agent", DESKTOP_USER_AGENT)
-            .header("Accept", "application/json")
-            .apply { if (!clientToken.isNullOrBlank()) header("Client-Token", clientToken) }
-            .build()
-        repeat(PAGE_ATTEMPTS) { attempt ->
-            val (code, body, retryAfter) = try {
-                client.newCall(request).execute().use { response ->
-                    Triple(response.code, response.body?.string(), response.header("Retry-After")?.toLongOrNull())
-                }
-            } catch (e: IOException) {
-                Triple(-1, null, null)
-            }
-            if (code in 200..299) return body.orEmpty()
-            if (code in 400..499 && code != 429) {
-                Log.w(TAG, "Pathfinder HTTP $code")
-                return null
-            }
-            Log.w(TAG, "Pathfinder HTTP $code, attempt ${attempt + 1}/$PAGE_ATTEMPTS")
-            if (attempt < PAGE_ATTEMPTS - 1) delay(((retryAfter ?: 0) * 1000).coerceIn(1000L shl attempt, 15_000L))
-        }
-        return null
-    }
-
     private fun stoppedAfter(read: Int, total: Int) =
         IOException("Spotify stopped answering after $read of $total tracks. Try again in a moment.")
 
@@ -502,7 +587,8 @@ class SpotifyPlaylistImporter @Inject constructor(
 
         /** Safety stop only (20 000 liked songs at 50 a page); the loop ends on totalCount. */
         const val MAX_PAGES = 400
-        const val PAGE_ATTEMPTS = 4
+        const val PATHFINDER_ATTEMPTS = 4
+        const val USER_PLAYLIST_COUNT_CONCURRENCY = 6
 
         const val EMBED_BASE = "https://open.spotify.com/embed/playlist/"
         const val SPOTIFY_TRACK_URI = "spotify:track:"

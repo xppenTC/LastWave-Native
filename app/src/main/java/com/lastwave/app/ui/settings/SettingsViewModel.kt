@@ -139,28 +139,6 @@ class SettingsViewModel @Inject constructor(
         .withSettingsFallback("Spotify prefer canvas preference", false)
         .stateIn(viewModelScope, SettingsSharing, false)
 
-    /** Whether a liked song is added to this app's own Liked Songs playlist. */
-    val likedSongsLocalSync: StateFlow<Boolean> = settingsPreferences.likedSongsLocalSync
-        .withSettingsFallback("Liked songs local sync preference", true)
-        .stateIn(viewModelScope, SettingsSharing, true)
-
-    /** Whether a liked song is also marked as liked on YouTube Music. */
-    val likedSongsYouTubeSync: StateFlow<Boolean> = settingsPreferences.likedSongsYouTubeSync
-        .withSettingsFallback("Liked songs YouTube sync preference", true)
-        .stateIn(viewModelScope, SettingsSharing, true)
-
-    fun setLikedSongsLocalSync(enabled: Boolean) {
-        viewModelScope.launch {
-            settingsPreferences.setLikedSongsLocalSync(enabled)
-        }
-    }
-
-    fun setLikedSongsYouTubeSync(enabled: Boolean) {
-        viewModelScope.launch {
-            settingsPreferences.setLikedSongsYouTubeSync(enabled)
-        }
-    }
-
     fun setSpotifyCanvasEnabled(enabled: Boolean) {
         viewModelScope.launch {
             spotifyPreferences.setCanvasEnabled(enabled)
@@ -548,8 +526,11 @@ class SettingsViewModel @Inject constructor(
 
     fun setDynamicNowPlaying(enabled: Boolean) = launchSettingsAction("update dynamic theme") { themeRepository.setDynamicNowPlaying(enabled) }
     fun setUseCustomFont(enabled: Boolean) = launchSettingsAction("update the app font") { settingsPreferences.setUseCustomFont(enabled) }
+    fun setUseBoldFont(enabled: Boolean) = launchSettingsAction("update font weight") { settingsPreferences.setUseBoldFont(enabled) }
     fun setPreferLosslessStreaming(enabled: Boolean) = launchSettingsAction("update streaming preference") { settingsPreferences.setPreferLosslessStreaming(enabled) }
-    fun setLosslessQuality(quality: Int) = launchSettingsAction("update streaming quality") { settingsPreferences.setLosslessQuality(quality) }
+    fun setHiResStart(mode: com.lastwave.app.data.local.HiResStart) = launchSettingsAction("update hi-res start") { settingsPreferences.setHiResStart(mode) }
+    fun setWifiStreamingQuality(quality: Int) = launchSettingsAction("update Wi-Fi streaming quality") { settingsPreferences.setWifiStreamingQuality(quality) }
+    fun setCellularStreamingQuality(quality: Int) = launchSettingsAction("update cellular streaming quality") { settingsPreferences.setCellularStreamingQuality(quality) }
     fun setDownloadQuality(quality: Int) = launchSettingsAction("update download quality") { settingsPreferences.setDownloadQuality(quality) }
     fun setStudioMasterClarity(enabled: Boolean) {
         // Apply immediately; DataStore persists the same state for future engine instances.
@@ -901,6 +882,7 @@ class SettingsViewModel @Inject constructor(
                     return@launch
                 }
                 val bytesWritten = fileExportHelper.writeTextToUri(uri, json)
+                runCatching { playlistRepository.exportPublicMirror() }
                 _uiState.update { it.copy(toastMessage = appContext.getString(com.lastwave.app.R.string.toast_backup_ok, bytesWritten / 1024)) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(toastMessage = appContext.getString(com.lastwave.app.R.string.toast_backup_fail, e.localizedMessage ?: e.message)) }

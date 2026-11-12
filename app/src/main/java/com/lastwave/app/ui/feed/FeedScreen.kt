@@ -328,7 +328,7 @@ fun FeedScreen(
         if (isPodcastsActive) {
             com.lastwave.app.ui.feed.cards.PodcastHeroBackground(
                 backgroundUrl = state.chipBackgroundUrl,
-                scrollOffsetY = podcastHeroScrollOffset,
+                scrollOffsetY = { podcastHeroScrollOffset },
             )
         }
 
@@ -3212,7 +3212,7 @@ private fun HomeContainerSection(
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun FeedSectionHeader(
+internal fun FeedSectionHeader(
     title: String,
     subtitle: String? = null,
     actionText: String? = null,
