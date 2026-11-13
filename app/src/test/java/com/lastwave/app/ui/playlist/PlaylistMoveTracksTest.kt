@@ -60,7 +60,6 @@ class PlaylistMoveTracksTest {
         ytMusicSyncManager = mockk(relaxed = true),
         ytMusicLibraryManager = mockk(relaxed = true),
         trackDownloadManager = mockk(relaxed = true),
-        innerTubeApi = mockk(relaxed = true),
         routeNavigator = mockk(relaxed = true),
         localMusicLibrary = mockk(relaxed = true),
         likedSongsManager = likedSongsManager,

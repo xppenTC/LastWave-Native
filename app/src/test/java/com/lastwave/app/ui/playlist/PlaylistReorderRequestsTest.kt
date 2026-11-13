@@ -68,7 +68,7 @@ class PlaylistReorderRequestsTest {
             repository, mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true),
             mockk(relaxed = true), GenerationStatus(), exportEvents, ytPreferences,
             mockk(relaxed = true), library, mockk(relaxed = true), mockk(relaxed = true),
-            mockk(relaxed = true), mockk(relaxed = true), spotify, settings,
+            mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true), spotify, settings,
         )
     }
 
