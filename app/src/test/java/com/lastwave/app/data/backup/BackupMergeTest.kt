@@ -231,4 +231,12 @@ class BackupMergeTest {
             assertThat(BackupMerge.inLocalOrder(merged, local, remote)).isEqualTo(oldInLocalOrder(merged, local, remote))
         }
     }
+
+    @Test
+    fun `a desktop's Local songs is dropped, the phone's stays`() {
+        val phone = pl(1, listOf(t("mine", "/storage/emulated/0/Music/a.flac")), title = "Local songs", mode = "local")
+        val desktop = pl(2, listOf(t("pc")), title = "Local songs", mode = "local")
+        val m = BackupMerge.merge(base = null, local = file(listOf(phone, desktop)), remote = file(listOf(desktop)))
+        assertThat(m.playlists.map { it.id }).containsExactly(1L)
+    }
 }

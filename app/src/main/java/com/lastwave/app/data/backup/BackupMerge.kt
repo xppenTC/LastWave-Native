@@ -1,7 +1,9 @@
 package com.lastwave.app.data.backup
 
 import com.lastwave.app.data.generate.StoredTrack
+import com.lastwave.app.data.generate.isLocalAudioPath
 import com.lastwave.app.data.playlist.LIKED_SONGS_MODE
+import com.lastwave.app.data.playlist.LOCAL_SONGS_MODE
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -65,7 +67,7 @@ object BackupMerge {
                 theirs != null -> theirs.takeIf { old == null || !same(it, old) }
                 else -> null
             }
-        }
+        }.filterNot(::isDesktopLocalSongs)
         // Schema 6 and older files say nothing about exclusions: keep ours.
         val remoteExclusions = if (remote.schemaVersion >= 7) {
             remote.recommendationExclusions
@@ -80,6 +82,17 @@ object BackupMerge {
                 remoteExclusions,
             ) { it.trackKey },
         )
+    }
+
+    /**
+     * A desktop's own "Local songs" that older desktops sent through the file: none
+     * of its tracks is a file on the phone. Only the phone's own is kept. Same rule
+     * as the desktop's backup_sync.dart.
+     */
+    private fun isDesktopLocalSongs(p: BackupPlaylistSnapshot): Boolean {
+        if (p.mode != LOCAL_SONGS_MODE) return false
+        val tracks = tracksOf(p)
+        return tracks.isNotEmpty() && tracks.none { isLocalAudioPath(it.url) }
     }
 
     private fun meta(p: BackupPlaylistSnapshot) =
