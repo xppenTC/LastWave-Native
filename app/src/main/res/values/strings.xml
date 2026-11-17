@@ -1313,6 +1313,7 @@
     <string name="alb_tracks">Tracks</string>
     <string name="alb_empty">No tracks listed for this album right now — try again later.</string>
     <string name="alb_load_fail">Failed to load album details</string>
+    <string name="alb_save_fail">Couldn\'t save album. Try again.</string>
 
     <!-- New releases -->
     <string name="nr_title">New releases</string>

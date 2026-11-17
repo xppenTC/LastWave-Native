@@ -7,7 +7,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.generate.StoredTrack
 import com.lastwave.app.data.generate.distinctSongs
-import com.lastwave.app.data.generate.isLocalFile
+import com.lastwave.app.data.generate.isDirectPlayback
 import com.lastwave.app.data.generate.toGenerated
 import com.lastwave.app.data.generate.toStored
 import com.lastwave.app.data.generate.youtubeVideoIdOrNull
@@ -59,7 +59,7 @@ internal data class LikeSyncJournal(
     private fun withIntents(intents: List<Pair<GeneratedTrack, Boolean>>, account: String): LikeSyncJournal {
         val existing = pending.filter { it.account == account }
             .flatMap { change -> change.track.toGenerated().likedMarkers().map { it to change } }.toMap()
-        val changes = intents.filterNot { it.first.isLocalFile() }.mapIndexed { index, (track, liked) ->
+        val changes = intents.filterNot { it.first.isDirectPlayback() }.mapIndexed { index, (track, liked) ->
             val previous = track.likedMarkers().firstNotNullOfOrNull(existing::get)?.track?.toGenerated()
             val resolved = if (track.youtubeVideoIdOrNull() == null && previous?.youtubeVideoIdOrNull() != null) {
                 track.copy(url = previous.url)
@@ -299,7 +299,11 @@ class YtLikedSongsSync @Inject constructor(
         val raw = dataStore.data.recoverPreferences("YtLikedSongsSync").first().readSafely(JOURNAL_KEY)
             ?: return LikeSyncJournal()
         return try {
-            json.decodeFromString(raw)
+            // Drops KHInsider likes queued before they were filtered out: they have no
+            // YouTube twin, and a title + game-name match liked strangers on the account.
+            json.decodeFromString<LikeSyncJournal>(raw).let { journal ->
+                journal.copy(pending = journal.pending.filterNot { it.track.toGenerated().isDirectPlayback() })
+            }
         } catch (error: Exception) {
             android.util.Log.w("YtLikedSongsSync", "Rebuilding unreadable like journal from saved songs", error)
             LikeSyncJournal()

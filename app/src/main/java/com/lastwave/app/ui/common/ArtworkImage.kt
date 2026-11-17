@@ -71,8 +71,10 @@ fun ArtworkImage(
     var lastSuccessfulPainter by remember(key) { mutableStateOf<Painter?>(null) }
 
     // Local songs: a cover extracted from the user's own file wins
-    // over any online lookup, and no lookup is started for it.
-    val localCover = embeddedUrl?.startsWith("file://") == true && !embeddedFailed
+    // over any online lookup, and no lookup is started for it. Same for KHInsider's
+    // own album scans: a store search by title + game name finds unrelated covers.
+    val localCover = (embeddedUrl?.startsWith("file://") == true ||
+        embeddedUrl?.contains("vgmtreasurechest.com") == true) && !embeddedFailed
 
     LaunchedEffect(key, resolvedFailed, localCover) {
         if (localCover) return@LaunchedEffect

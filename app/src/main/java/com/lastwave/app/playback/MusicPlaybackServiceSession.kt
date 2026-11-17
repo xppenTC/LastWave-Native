@@ -411,13 +411,19 @@ internal fun MusicPlaybackService.publishSystemState(state: MusicPlayerState) {
                         val rawArt = artworkBitmap?.takeIf { !it.isRecycled }
                         val limit = sessionArtworkLimitPx
                         val art = if (rawArt != null && (rawArt.width > limit || rawArt.height > limit)) {
-                            val scale = limit.toFloat() / maxOf(rawArt.width, rawArt.height)
-                            Bitmap.createScaledBitmap(
-                                rawArt,
-                                (rawArt.width * scale).toInt().coerceAtLeast(1),
-                                (rawArt.height * scale).toInt().coerceAtLeast(1),
-                                true,
-                            )
+                            // Car lyrics republish this every line: scale each cover once.
+                            sessionArtScaled?.takeIf { sessionArtSource === rawArt && !it.isRecycled } ?: run {
+                                val scale = limit.toFloat() / maxOf(rawArt.width, rawArt.height)
+                                Bitmap.createScaledBitmap(
+                                    rawArt,
+                                    (rawArt.width * scale).toInt().coerceAtLeast(1),
+                                    (rawArt.height * scale).toInt().coerceAtLeast(1),
+                                    true,
+                                ).also {
+                                    sessionArtSource = rawArt
+                                    sessionArtScaled = it
+                                }
+                            }
                         } else rawArt
                         if (art != null) {
                             putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, art)

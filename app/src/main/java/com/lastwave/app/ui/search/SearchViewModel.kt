@@ -72,8 +72,11 @@ class SearchViewModel @Inject constructor(
     }
 
     fun setQuery(query: String) {
+        // YouTube suggestions mean nothing for KHInsider, which sits behind Cloudflare:
+        // no suggestions there and a longer pause before searching.
+        val games = _uiState.value.tab == SearchTab.GAMES
         _uiState.update {
-            it.copy(query = query, songSuggestions = emptyList(), isShowingSuggestions = query.isNotBlank())
+            it.copy(query = query, songSuggestions = emptyList(), isShowingSuggestions = query.isNotBlank() && !games)
         }
         debounceJob?.cancel()
         suggestionsJob?.cancel()
@@ -93,7 +96,7 @@ class SearchViewModel @Inject constructor(
         }
 
         // Fast suggestions debounce (120ms)
-        suggestionsJob = viewModelScope.launch {
+        if (!games) suggestionsJob = viewModelScope.launch {
             delay(120)
             val suggestions = repository.getSuggestions(query)
             if (_uiState.value.query == query) {
@@ -103,7 +106,7 @@ class SearchViewModel @Inject constructor(
 
         // Full search results debounce (350ms)
         debounceJob = viewModelScope.launch {
-            delay(350)
+            delay(if (games) 800 else 350)
             triggerSearch(query, saveToHistory = false)
         }
     }

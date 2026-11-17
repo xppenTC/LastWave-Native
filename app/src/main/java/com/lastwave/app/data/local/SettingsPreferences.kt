@@ -563,7 +563,7 @@ class SettingsPreferences @Inject constructor(
                 useAlbumArtistForFolders = p.readSafely(Keys.USE_ALBUM_ARTIST_FOLDERS) ?: true,
                 primaryArtistOnly = p.readSafely(Keys.PRIMARY_ARTIST_ONLY) ?: true,
                 hiddenHomeSections = p.readSafely(Keys.HIDDEN_HOME_SECTIONS)
-                    ?.filter { id -> HomeSection.entries.any { it.id == id } }?.toSet()
+                    ?.filter { id -> HomeSection.fromId(id) != null }?.toSet()
                     ?: emptySet(),
                 ytMusicHiddenSections = p.readSafely(Keys.YT_MUSIC_HIDDEN_SECTIONS) ?: emptySet(),
                 ytMusicSectionsOrder = p.readSafely(Keys.YT_MUSIC_SECTIONS_ORDER)?.split("|||")?.filter { it.isNotBlank() } ?: emptyList(),
@@ -1129,7 +1129,7 @@ class SettingsPreferences @Inject constructor(
     suspend fun saveUniversalHomeSections(order: List<String>, hidden: Set<String>, pinned: Set<String>) {
         dataStore.edit { prefs ->
             prefs[Keys.HOME_SECTIONS_ORDER] = order.joinToString("|||")
-            val inApp = hidden.filter { id -> HomeSection.entries.any { it.id == id } }.toSet()
+            val inApp = hidden.filter { id -> HomeSection.fromId(id) != null }.toSet()
             val yt = hidden.filter { id -> id.startsWith("yt:") }.map { it.removePrefix("yt:") }.toSet()
             prefs[Keys.HIDDEN_HOME_SECTIONS] = inApp
             prefs[Keys.YT_MUSIC_HIDDEN_SECTIONS] = yt

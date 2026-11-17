@@ -20,6 +20,8 @@ private val YT_SHELF_ALIASES: Map<String, List<String>> = mapOf(
 internal fun ytShelfMatches(title: String, listed: String): Boolean {
     val t = title.trim().lowercase()
     val h = listed.trim().lowercase()
+    // An untitled shelf would "start with" every section and vanish with any of them.
+    if (t.isEmpty()) return false
     return t == h || t.startsWith(h) || h.startsWith(t) || YT_SHELF_ALIASES[h].orEmpty().any { t.contains(it) }
 }
 

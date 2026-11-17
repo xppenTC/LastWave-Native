@@ -100,7 +100,21 @@ object BackupMerge {
         val baseKeys = baseTracks.map(::trackKey).toSet()
         val localKeys = localTracks.map(::trackKey).toSet()
         val removed = baseTracks.filter { holds(it) && trackKey(it) !in localKeys }.map(::trackKey).toSet()
-        val result = remoteTracks.filter { trackKey(it) !in removed }.toMutableList()
+        val baseByKey = baseTracks.associateBy(::trackKey)
+        val localByKey = localTracks.associateBy(::trackKey)
+        // A shared track edited here since the last sync (video id re-pinned, artwork...)
+        // keeps our copy, else the file's copy undid the edit every sync. A file copy
+        // without a link gets ours back (old desktops exported KHInsider tracks without one).
+        fun shared(t: StoredTrack): StoredTrack {
+            val mine = localByKey[trackKey(t)] ?: return t
+            val old = baseByKey[trackKey(t)]
+            return when {
+                old != null && mine != old -> mine
+                t.url.isNullOrEmpty() && !mine.url.isNullOrEmpty() -> t.copy(url = mine.url)
+                else -> t
+            }
+        }
+        val result = remoteTracks.filter { trackKey(it) !in removed }.map(::shared).toMutableList()
         val present = result.map(::trackKey).toMutableSet()
         var front = 0
         var belowShared = false
@@ -139,23 +153,39 @@ object BackupMerge {
     }
 
     /** [merged] in [local]'s order; a track only the file has follows the one before it there. */
-    private fun inLocalOrder(
+    internal fun inLocalOrder(
         merged: List<StoredTrack>,
         local: List<StoredTrack>,
         remote: List<StoredTrack>,
     ): List<StoredTrack> {
         val byKey = merged.associateBy(::trackKey)
-        val outKeys = local.map(::trackKey).filter { it in byKey }.distinct().toMutableList()
-        var after = -1
+        // A linked list (key -> next key): inserting after a known track is O(1), where
+        // indexOf + add on a list made a 10 000-track playlist take seconds.
+        val next = HashMap<String, String?>()
+        var head: String? = null
+        var tail: String? = null
+        for (key in local.map(::trackKey)) {
+            if (key !in byKey || key in next) continue
+            if (tail == null) head = key else next[tail] = key
+            next[key] = null
+            tail = key
+        }
+        var after: String? = null
         for (key in remote.map(::trackKey)) {
-            val at = outKeys.indexOf(key)
-            if (at >= 0) {
-                after = at
+            if (key in next) {
+                after = key
             } else if (key in byKey) {
-                outKeys.add(++after, key)
+                if (after == null) {
+                    next[key] = head
+                    head = key
+                } else {
+                    next[key] = next[after]
+                    next[after] = key
+                }
+                after = key
             }
         }
-        return outKeys.map(byKey::getValue)
+        return generateSequence(head) { next[it] }.map(byKey::getValue).toList()
     }
 
     private fun <T> mergeByKey(

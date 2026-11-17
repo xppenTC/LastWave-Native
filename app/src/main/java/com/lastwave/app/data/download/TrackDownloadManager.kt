@@ -631,13 +631,17 @@ class TrackDownloadManager @Inject constructor(
                 // InnerTube parsing), this is the safety net for stale callers and
                 // for the already-queued stat-artist downloads.
                 val rawTitle = title.trim()
-                val rawArtistIsStat = ArtistHelper.isPlayCountOrStat(artist)
-                var safeArtist = artist.trim().takeUnless { ArtistHelper.isPlayCountOrStat(it) }?.ifBlank { null }
-                var safeAlbumInput = album?.trim()?.takeUnless { ArtistHelper.isPlayCountOrStat(it) }?.takeIf { it.isNotBlank() }
+                // KHInsider tags are the site's own (artist = the game's album): nothing to
+                // "repair", and a YouTube or store lookup by title + game name finds strangers.
+                val kh = khInsiderPage != null
+                fun isStat(value: String) = !kh && ArtistHelper.isPlayCountOrStat(value)
+                val rawArtistIsStat = isStat(artist)
+                var safeArtist = artist.trim().takeUnless(::isStat)?.ifBlank { null }
+                var safeAlbumInput = album?.trim()?.takeUnless(::isStat)?.takeIf { it.isNotBlank() }
                 // If the artist was a counter but the album title is known (album
                 // download case), recover the real artist via search before any
                 // network/stream work so tagging, filenames and DB stay correct.
-                if (safeArtist.isNullOrBlank() && rawTitle.isNotBlank()) {
+                if (!kh && safeArtist.isNullOrBlank() && rawTitle.isNotBlank()) {
                     val recoveryQueryArtist = safeAlbumInput.orEmpty()
                     val recovered = runCatching {
                         if (recoveryQueryArtist.isNotBlank()) {
@@ -676,7 +680,7 @@ class TrackDownloadManager @Inject constructor(
                     }.getOrNull()
                 }
 
-                if (preloadedBestMatch == null && (resolvedArtworkUrl == null || resolvedAlbum == null)) {
+                if (!kh && preloadedBestMatch == null && (resolvedArtworkUrl == null || resolvedAlbum == null)) {
                     preloadedBestMatch = runCatching {
                         innerTube.findBestMatch(effTitle, effArtistForLookup, prefetchStreams = false)
                     }.getOrNull()
@@ -707,7 +711,7 @@ class TrackDownloadManager @Inject constructor(
                 }
                 if (resolvedAlbum != null) {
                     resolvedAlbum = resolvedAlbum?.trim()
-                        ?.takeUnless { ArtistHelper.isPlayCountOrStat(it) }
+                        ?.takeUnless(::isStat)
                         ?.takeIf { it.isNotBlank() }
                 }
                 // Final sanitized values for tagging, filenames, folders and DB.
@@ -719,7 +723,7 @@ class TrackDownloadManager @Inject constructor(
                 // fans out into N artists/albums ("15 ml listens", "Track 3"...).
                 val finalKey = makeDownloadKey(finalTitle, finalArtist)
 
-                val artworkFallback = if (resolvedArtworkUrl == null) {
+                val artworkFallback = if (resolvedArtworkUrl == null && !kh) {
                     async(Dispatchers.IO) {
                         artworkRepository.resolve(finalTitle, finalArtist)
                         val cacheKey = ArtworkNormalizer.cacheKey(finalTitle, finalArtist)
@@ -1759,7 +1763,7 @@ class TrackDownloadManager @Inject constructor(
 
                     // KHInsider albums keep their track order in the folder: "07. Title.flac".
                     val safeFilename = if (khInsiderPage != null && trackNumber != null) {
-                        sanitizeFilename("%02d. %s".format(trackNumber, finalTitle)) + ".$extension"
+                        sanitizeFilename("%02d. %s".format(java.util.Locale.ROOT, trackNumber, finalTitle)) + ".$extension"
                     } else {
                         sanitizeFilename("$finalArtist - $finalTitle") + ".$extension"
                     }

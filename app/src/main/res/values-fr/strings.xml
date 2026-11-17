@@ -1041,6 +1041,7 @@
     <string name="alb_tracks">Pistes</string>
     <string name="alb_empty">Aucun titre répertorié pour cet album pour le moment. Réessayez plus tard.</string>
     <string name="alb_load_fail">Échec du chargement des détails de l\'album</string>
+    <string name="alb_save_fail">Impossible d\'enregistrer l\'album. Essayer à nouveau.</string>
     <string name="nr_title">Nouvelles versions</string>
     <string name="nr_sub">Trouver des gouttes fraîches</string>
     <string name="nr_load_fail">Impossible de charger les nouvelles versions</string>

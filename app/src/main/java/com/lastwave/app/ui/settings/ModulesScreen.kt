@@ -353,6 +353,8 @@ fun ModulesScreen(
                                 Switch(checked = addonRace, onCheckedChange = viewModel::setAddonRace)
                             }
                             Spacer(Modifier.height(8.dp))
+                            // Saved on release: one DataStore write per notch made the thumb lag.
+                            var switchDraft by remember(addonSwitchSeconds) { mutableStateOf(addonSwitchSeconds.toFloat()) }
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
                                     Text("Switch to the next source after", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
@@ -363,11 +365,12 @@ fun ModulesScreen(
                                     )
                                 }
                                 Spacer(Modifier.width(12.dp))
-                                Text("$addonSwitchSeconds s", style = MaterialTheme.typography.titleMedium)
+                                Text("${switchDraft.roundToInt()} s", style = MaterialTheme.typography.titleMedium)
                             }
                             Slider(
-                                value = addonSwitchSeconds.toFloat(),
-                                onValueChange = { viewModel.setAddonSwitchSeconds(it.roundToInt()) },
+                                value = switchDraft,
+                                onValueChange = { switchDraft = it },
+                                onValueChangeFinished = { viewModel.setAddonSwitchSeconds(switchDraft.roundToInt()) },
                                 // Only the order mode takes turns.
                                 enabled = !addonRace,
                                 valueRange = ADDON_SWITCH_SECONDS_RANGE.first.toFloat()..ADDON_SWITCH_SECONDS_RANGE.last.toFloat(),

@@ -27,4 +27,9 @@ class YtShelfFilterTest {
         // A listed shelf stays visible when only "other" is unchecked.
         assertThat(ytShelfHidden("Sélection rapide", setOf(YT_OTHER_SHELVES))).isFalse()
     }
+
+    @Test
+    fun untitledShelfIsNotHiddenByAListedSection() {
+        assertThat(ytShelfHidden("", setOf("Quick picks"))).isFalse()
+    }
 }

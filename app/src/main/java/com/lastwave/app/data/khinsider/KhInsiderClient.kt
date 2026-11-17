@@ -15,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -67,7 +68,7 @@ class KhInsiderClient @Inject constructor(
 
     fun recordDownload(pagePath: String, location: String) {
         downloadsPrefs.edit().putString(pagePath, location).apply()
-        _downloadedPages.value = _downloadedPages.value + pagePath
+        _downloadedPages.update { it + pagePath }
     }
 
     /** Re-reads the saved copies, dropping those deleted outside the app. */
@@ -88,7 +89,7 @@ class KhInsiderClient @Inject constructor(
         }.getOrDefault(false)
         if (!readable) {
             downloadsPrefs.edit().remove(pagePath).apply()
-            _downloadedPages.value = _downloadedPages.value - pagePath
+            _downloadedPages.update { it - pagePath }
             return null
         }
         return location
@@ -183,6 +184,9 @@ class KhInsiderClient @Inject constructor(
 
     private fun fetchBlocking(url: String): Page {
         val direct = runCatching { okHttpGet(url) }
+        // Offline or DNS failure: say so now, not after a 25 s WebView wait. HTTP errors
+        // (KhInsiderException) still try the WebView: Cloudflare answers 403/503.
+        direct.exceptionOrNull()?.let { if (it !is KhInsiderException) throw it }
         direct.getOrNull()?.let { page ->
             if (!KhInsiderParser.isCloudflareChallenge(page.html) && !KhInsiderParser.isCloudflareBlock(page.html)) {
                 return page
@@ -247,6 +251,7 @@ class KhInsiderClient @Inject constructor(
             }
         }
         val finished = done.await(WEBVIEW_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        done.countDown() // stops poll() before the WebView below is destroyed
         main.post {
             webViewRef.getAndSet(null)?.let { view ->
                 view.stopLoading()

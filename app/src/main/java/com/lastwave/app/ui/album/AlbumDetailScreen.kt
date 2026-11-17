@@ -38,6 +38,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.BookmarkAdd
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.filled.MoreVert
@@ -49,6 +51,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.Icon
@@ -210,6 +213,7 @@ fun AlbumDetailScreen(
             is AlbumUiState.Success -> {
                 val data = state.data
                 val isFavorite by viewModel.isFavorite.collectAsStateWithLifecycle()
+                val saveState by viewModel.saveUiState.collectAsStateWithLifecycle()
                 val isAlbumPlaying = playbackState.isPlaying &&
                     (playbackState.sourceLabel.contains(data.title, ignoreCase = true) || playbackState.current?.album.equals(data.title, ignoreCase = true))
 
@@ -314,7 +318,7 @@ fun AlbumDetailScreen(
 
                             Spacer(Modifier.height(18.dp))
 
-                            // Hero Action Buttons (Shuffle • Favorite • Large Play FAB)
+                            // Hero Action Buttons (Shuffle • Favorite • Save to Library • Large Play FAB)
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -362,6 +366,25 @@ fun AlbumDetailScreen(
                                             tint = MaterialTheme.colorScheme.primary,
                                         )
                                     }
+                                    FilledTonalIconButton(
+                                        onClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
+                                            viewModel.saveToLibrary()
+                                        },
+                                        enabled = !saveState.isSaving && !saveState.savedToLibrary && data.tracks.isNotEmpty(),
+                                        shape = CircleShape,
+                                        colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                            containerColor = if (saveState.savedToLibrary) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer,
+                                        ),
+                                        modifier = Modifier.size(50.dp),
+                                    ) {
+                                        Icon(
+                                            if (saveState.savedToLibrary) Icons.Filled.Check else Icons.Filled.BookmarkAdd,
+                                            contentDescription = if (saveState.savedToLibrary) "Saved to library" else "Save album to library",
+                                            modifier = Modifier.size(22.dp),
+                                            tint = if (saveState.savedToLibrary) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSecondaryContainer,
+                                        )
+                                    }
                                 }
 
                                 // Large Floating Primary Play Button (56dp circle)
@@ -386,6 +409,16 @@ fun AlbumDetailScreen(
                                         )
                                     }
                                 }
+                            }
+
+                            saveState.saveError?.let { message ->
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    text = message,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
                             }
                         }
                     }

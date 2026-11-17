@@ -2199,7 +2199,7 @@ fun SettingsScreen(
                                     else -> stringResource(R.string.settings_drive_sub)
                                 },
                                 onClick = {
-                                    if (drive.connected) driveScope.launch { viewModel.driveSync.syncNow() } else connectDrive()
+                                    if (drive.connected) viewModel.driveSync.requestSync() else connectDrive()
                                 },
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "backup.drive"),

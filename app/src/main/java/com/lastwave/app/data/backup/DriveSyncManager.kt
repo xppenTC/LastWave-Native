@@ -106,11 +106,18 @@ class DriveSyncManager @Inject constructor(
     fun onConnected() {
         prefs.edit().putBoolean(KEY_CONNECTED, true).apply()
         _state.update { it.copy(connected = true, error = null) }
+        requestSync()
+    }
+
+    /** Syncs in the app scope: leaving the settings screen must not cancel it mid-upload. */
+    fun requestSync() {
         applicationScope.launch { syncNow() }
     }
 
     fun disconnect() {
         prefs.edit().putBoolean(KEY_CONNECTED, false).apply()
+        // The next account's file is another library: start it from a union, not this base.
+        java.io.File(context.filesDir, SYNC_BASE).delete()
         _state.value = State()
     }
 
@@ -118,7 +125,7 @@ class DriveSyncManager @Inject constructor(
         if (!_state.value.connected || mutex.isLocked) return
         mutex.withLock {
             _state.update { it.copy(syncing = true, error = null) }
-            val error = runCatching {
+            val error = try {
                 val result = authorize()
                 val token = result.accessToken
                 if (result.hasResolution() || token == null) {
@@ -135,7 +142,14 @@ class DriveSyncManager @Inject constructor(
                         if (++attempt > 2) throw stale
                     }
                 }
-            }.exceptionOrNull()
+                null
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                // Not an error to show: the next sync picks up where this one stopped.
+                _state.update { it.copy(syncing = false) }
+                throw cancelled
+            } catch (e: Exception) {
+                e
+            }
             _state.update {
                 it.copy(
                     syncing = false,
@@ -150,12 +164,14 @@ class DriveSyncManager @Inject constructor(
         val listUrl = "$DRIVE/files".toHttpUrl().newBuilder()
             .addQueryParameter("spaces", "appDataFolder")
             .addQueryParameter("q", "name = '$FILE_NAME'")
+            // Two devices creating the file at once leave two: all pick the oldest.
+            .addQueryParameter("orderBy", "createdTime")
             .addQueryParameter("fields", "files(id,version)")
             .build()
         val files = jsonOf(call(Request.Builder().url(listUrl), token))["files"]?.jsonArray.orEmpty()
         val result = if (files.isEmpty()) {
             // First device to sync: the file starts as this library.
-            backupRepository.sync(backupRepository.buildBackup(BuildConfig.VERSION_NAME), BuildConfig.VERSION_NAME) {
+            backupRepository.sync(backupRepository.buildBackup(BuildConfig.VERSION_NAME), BuildConfig.VERSION_NAME, SYNC_BASE) {
                 createFile(token, it)
             }
         } else {
@@ -163,7 +179,7 @@ class DriveSyncManager @Inject constructor(
             val id = file["id"]!!.jsonPrimitive.content
             val version = file["version"]?.jsonPrimitive?.content
             val content = call(Request.Builder().url("$DRIVE/files/$id?alt=media"), token)
-            backupRepository.sync(content, BuildConfig.VERSION_NAME) { merged ->
+            backupRepository.sync(content, BuildConfig.VERSION_NAME, SYNC_BASE) { merged ->
                 val now = jsonOf(call(Request.Builder().url("$DRIVE/files/$id?fields=version"), token))
                 if (now["version"]?.jsonPrimitive?.content != version) throw StaleFile()
                 // shortcut: a write landing between this check and the upload is
@@ -211,6 +227,8 @@ class DriveSyncManager @Inject constructor(
     private suspend fun <T> Task<T>.await(): T = suspendCancellableCoroutine { cont ->
         addOnSuccessListener { cont.resume(it) }
         addOnFailureListener { cont.resumeWithException(it) }
+        // Without this a cancelled task never resumes and keeps the sync mutex forever.
+        addOnCanceledListener { cont.cancel() }
     }
 
     private companion object {
@@ -219,6 +237,8 @@ class DriveSyncManager @Inject constructor(
         const val UPLOAD = "https://www.googleapis.com/upload/drive/v3"
         const val FILE_NAME = "lastwave-sync.json"
         const val KEY_CONNECTED = "connected"
+        /** Drive's own merge base, apart from "Sync with file"'s. */
+        const val SYNC_BASE = "backup_sync_base_drive.json"
         const val CHANGE_DEBOUNCE_MS = 30_000L
         const val HEARTBEAT_MS = 10 * 60_000L
         val JSON_TYPE = "application/json".toMediaType()

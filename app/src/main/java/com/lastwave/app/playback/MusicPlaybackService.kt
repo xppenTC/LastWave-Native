@@ -191,6 +191,8 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
     internal var originLyricsMediaId: String? = null
     internal var artworkUrl: String? = null
     internal var artworkBitmap: Bitmap? = null
+    internal var sessionArtSource: Bitmap? = null
+    internal var sessionArtScaled: Bitmap? = null
     /**
      * The platform's `config_mediaMetadataBitmapMaxSize` (320dp in AOSP),
      * resolved against this app's resources exactly as MediaSession does, so

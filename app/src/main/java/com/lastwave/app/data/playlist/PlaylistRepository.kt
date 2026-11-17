@@ -429,7 +429,7 @@ class PlaylistRepository @Inject constructor(
             if (playlist.mode != "custom" && playlist.mode != LIKED_SONGS_MODE) return@withLock 0
             val fresh = mutableListOf<GeneratedTrack>()
             for (track in tracks) {
-                if ((playlist.tracks + fresh).none { it.sameSongAs(track) }) fresh += track
+                if (playlist.tracks.none { it.sameSongAs(track) } && fresh.none { it.sameSongAs(track) }) fresh += track
             }
             if (fresh.isEmpty()) return@withLock 0
             val updated = entity.copy(tracksJson = json.encodeToString((playlist.tracks + fresh).map { it.toStored() }))

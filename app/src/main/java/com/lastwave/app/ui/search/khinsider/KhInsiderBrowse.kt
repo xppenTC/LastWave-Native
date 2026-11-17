@@ -300,7 +300,10 @@ fun KhInsiderListOverlay(
         }
     }
     LaunchedEffect(listState) {
-        snapshotFlow { nearEnd }.distinctUntilChanged().filter { it }.collect { viewModel.loadMore() }
+        // Also after each load: a page of mostly duplicates leaves nearEnd true, and
+        // without a fresh true nothing loaded again. No retry loop on errors.
+        snapshotFlow { nearEnd && !state.loading && state.error == null }
+            .distinctUntilChanged().filter { it }.collect { viewModel.loadMore() }
     }
     Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
         Column(

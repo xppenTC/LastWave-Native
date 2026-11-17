@@ -170,6 +170,13 @@ internal fun MusicPlaybackService.requestArtwork(track: PlayableTrack?) {
         artworkUrl = null
         artworkJob?.cancel()
 
+        // KHInsider's scan is the album's own cover; a store search by title + game name
+        // finds strangers (same rule as ArtworkImage).
+        if (com.lastwave.app.data.generate.isKhInsiderUrl(track.playbackUrl)) {
+            track.artworkUrl?.takeIf(String::isNotBlank)?.let { fetchArtwork(it) }
+            return
+        }
+
         val key = com.lastwave.app.data.artwork.ArtworkNormalizer.cacheKey(track.title, track.artist)
         val cached = artworkRepository.resolved.value[key]?.takeIf(String::isNotBlank)
         if (cached != null) {

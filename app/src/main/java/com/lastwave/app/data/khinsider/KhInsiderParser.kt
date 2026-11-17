@@ -73,10 +73,10 @@ object KhInsiderParser {
     /** Popular lists, as linked from the site's menu. */
     val POPULAR_LISTS = listOf(
         KhBrowseList("top40", "Top 40", "/top40", paged = false),
-        KhBrowseList("top6m", "Top 100 · 6 mois", "/last-6-months-top-100", paged = false),
-        KhBrowseList("topnew", "Top 100 · nouveautés", "/top-100-newly-added", paged = false),
-        KhBrowseList("favorites", "Les plus favoris", "/most-favorites", paged = false),
-        KhBrowseList("alltime", "Top 1000 de tous les temps", "/all-time-top-1000", paged = false),
+        KhBrowseList("top6m", "Top 100 · last 6 months", "/last-6-months-top-100", paged = false),
+        KhBrowseList("topnew", "Top 100 · newly added", "/top-100-newly-added", paged = false),
+        KhBrowseList("favorites", "Most favorited", "/most-favorites", paged = false),
+        KhBrowseList("alltime", "All-time top 1000", "/all-time-top-1000", paged = false),
     )
 
     /** Main platforms from the site's menu (slug -> label); the full list comes from /console-list. */
@@ -213,6 +213,10 @@ object KhInsiderParser {
             .ifEmpty { listOf("mp3") }
 
         val tracks = mutableListOf<KhTrack>()
+        // Same-named tracks (one per disc, often) shared one "name|artist" key: the second
+        // was never downloaded, and playlists and sync took them for one song. Same rule
+        // as the desktop's khinsider_parser.dart.
+        val seen = HashMap<String, Int>()
         for (row in table.select("tr")) {
             if (row.selectFirst("th") != null || row.id() == "songlist_footer") continue
             val link = row.select("a[href]").firstOrNull { a ->
@@ -224,11 +228,13 @@ object KhInsiderParser {
             val number = numberIdx.takeIf { it >= 0 }?.let { TRACK_NUMBER.find(cells[it])?.groupValues?.get(1)?.toIntOrNull() }
             val disc = numberIdx.takeIf { it > 0 }?.let { cells[it - 1].toIntOrNull() }
             val duration = cells.firstOrNull { DURATION.matches(it) }?.let(::parseDuration)
+            val title = link.text().trim()
+            val count = seen.merge(title.lowercase(), 1, Int::plus)!!
             tracks += KhTrack(
                 pagePath = link.attr("href").let { href ->
                     if (href.startsWith("http")) href.substringAfter("khinsider.com") else href
                 },
-                name = link.text().trim(),
+                name = if (count == 1) title else "$title ($count)",
                 number = number,
                 disc = disc,
                 durationSeconds = duration,

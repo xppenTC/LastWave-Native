@@ -56,7 +56,13 @@ private val SENSITIVE_PREFERENCE_NAMES = setOf(
     "lw_sessionkey",
     "lw_addon_url",
     "lw_http_addons_json",
+    // Spotify session: the sync file sits in Drive and on the PC in clear.
+    "spotify_sp_dc",
+    "spotify_personal_token",
+    "spotify_client_token",
 )
+
+internal fun isSensitivePreference(key: String) = key in SENSITIVE_PREFERENCE_NAMES
 
 
 @Serializable
@@ -151,7 +157,7 @@ class BackupRepository @Inject constructor(
         val stringSets = mutableMapOf<String, Set<String>>()
         for (entry in prefs.asMap()) {
             val key = entry.key.name
-            if (key in SENSITIVE_PREFERENCE_NAMES) continue
+            if (isSensitivePreference(key)) continue
             when (val value = entry.value) {
                 is String -> strings[key] = value
                 is Boolean -> booleans[key] = value
@@ -306,10 +312,24 @@ class BackupRepository @Inject constructor(
      * here and the merged file kept as the next sync's base. Settings are
      * never touched; the file carries this phone's own (minus credentials),
      * so a plain restore of it still works.
+     *
+     * [baseName] is the merge base kept for this sync target: Drive keeps its
+     * own, so a file from another account or an old export is not read as
+     * "deleted elsewhere" against the other target's base.
      */
     suspend fun sync(
         content: String,
         appVersionName: String,
+        baseName: String = SYNC_BASE_FILE,
+        writeFile: suspend (String) -> Unit,
+    ): RestoreResult = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        syncOnIo(content, appVersionName, baseName, writeFile)
+    }
+
+    private suspend fun syncOnIo(
+        content: String,
+        appVersionName: String,
+        baseName: String,
         writeFile: suspend (String) -> Unit,
     ): RestoreResult {
         val remote = try {
@@ -322,7 +342,7 @@ class BackupRepository @Inject constructor(
         if (runCatching { remote.playlists.forEach(BackupMerge::tracksOf) }.isFailure) {
             return RestoreResult.InvalidFile
         }
-        val baseFile = java.io.File(context.filesDir, SYNC_BASE_FILE)
+        val baseFile = java.io.File(context.filesDir, baseName)
         val base = runCatching {
             baseFile.takeIf { it.exists() }?.let { json.decodeFromString<BackupFile>(it.readText()) }
         }.getOrNull()

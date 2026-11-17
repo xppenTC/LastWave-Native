@@ -179,8 +179,22 @@ class InternalDirectOutput @Inject constructor(
         override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) = onRouteChanged()
     }
 
+    // Android Auto no longer sets car UI mode: ask CarConnection, like MusicPlaybackService.
+    @Volatile private var carConnected = false
+
     init {
         runCatching { audioManager?.registerAudioDeviceCallback(deviceCallback, Handler(Looper.getMainLooper())) }
+        Handler(Looper.getMainLooper()).post {
+            runCatching {
+                androidx.car.app.connection.CarConnection(appContext).type.observeForever { type ->
+                    val connected = type != androidx.car.app.connection.CarConnection.CONNECTION_TYPE_NOT_CONNECTED
+                    if (connected != carConnected) {
+                        carConnected = connected
+                        onRouteChanged()
+                    }
+                }
+            }
+        }
         // Route only: the MMAP endpoint is probed lazily (settings open or
         // feature enabled), never at app start for users who keep it off.
         refreshAvailability(probe = false)
@@ -229,9 +243,10 @@ class InternalDirectOutput @Inject constructor(
     /** Current route as Android reports it for media playback. */
     fun currentRoute(): Pair<InternalRoute, String> {
         // Android Auto captures media into its own stream whatever device Android reports.
-        // shortcut: car mode stands for "projecting", upgrade to androidx.car.app CarConnection if a car launcher enables it.
         val uiMode = appContext.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
-        if (uiMode?.currentModeType == Configuration.UI_MODE_TYPE_CAR) return InternalRoute.ANDROID_AUTO to "Android Auto"
+        if (carConnected || uiMode?.currentModeType == Configuration.UI_MODE_TYPE_CAR) {
+            return InternalRoute.ANDROID_AUTO to "Android Auto"
+        }
         val manager = audioManager ?: return InternalRoute.UNKNOWN to ""
         val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             runCatching {

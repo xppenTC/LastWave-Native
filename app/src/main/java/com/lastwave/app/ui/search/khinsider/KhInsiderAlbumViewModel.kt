@@ -106,8 +106,13 @@ class KhInsiderAlbumViewModel @Inject constructor(
 
     fun addAlbumToPlaylist(playlist: SavedPlaylist) = viewModelScope.launch {
         val album = _state.value.album ?: return@launch
-        val added = runCatching { playlistRepository.addTracks(playlist.id, album.tracks.map { it.toGenerated(album) }) }
-            .getOrDefault(-1)
+        val added = try {
+            playlistRepository.addTracks(playlist.id, album.tracks.map { it.toGenerated(album) })
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            -1
+        }
         _messages.emit(
             when {
                 added < 0 -> context.getString(R.string.khinsider_add_failed, playlist.title)
@@ -183,6 +188,9 @@ class KhInsiderAlbumViewModel @Inject constructor(
             artworkUrl = album.coverUrl,
             album = album.name,
             url = KhInsiderParser.playbackUri(pagePath),
+            trackNumber = number,
+            discNumber = disc,
+            durationMs = durationSeconds?.takeIf { it > 0 }?.times(1_000L),
         )
     }
 }

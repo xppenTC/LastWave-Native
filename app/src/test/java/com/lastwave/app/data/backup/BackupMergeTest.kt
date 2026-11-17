@@ -175,4 +175,60 @@ class BackupMergeTest {
         )
         assertThat(m.exclusions.map { it.trackKey }).containsExactly("a|x", "b|x")
     }
+
+    @Test
+    fun `a shared track edited here keeps our copy and goes to the file`() {
+        val m = BackupMerge.merge(
+            base = file(listOf(pl(1, listOf(t("a", "old"), t("b"))))),
+            local = file(listOf(pl(1, listOf(t("a", "pinned"), t("b"))))),
+            remote = file(listOf(pl(1, listOf(t("a", "old"), t("b"))))),
+        )
+        assertThat(BackupMerge.tracksOf(m.playlists.single()).map { it.url }).containsExactly("pinned", "").inOrder()
+    }
+
+    @Test
+    fun `a file copy without a link gets ours back`() {
+        val link = "khinsider://track?page=%2Fx.mp3"
+        val m = BackupMerge.merge(
+            base = file(listOf(pl(1, listOf(t("a", link))))),
+            local = file(listOf(pl(1, listOf(t("a", link))))),
+            remote = file(listOf(pl(1, listOf(t("a"))))),
+        )
+        assertThat(BackupMerge.tracksOf(m.playlists.single()).single().url).isEqualTo(link)
+    }
+
+    @Test
+    fun `spotify session never leaves the phone`() {
+        for (key in listOf(
+            "ytm_cookies", "lw_apikey", "lw_apisecret", "lw_sessionkey", "lw_addon_url", "lw_http_addons_json",
+            "spotify_sp_dc", "spotify_personal_token", "spotify_client_token",
+        )) {
+            assertThat(isSensitivePreference(key)).isTrue()
+        }
+        assertThat(isSensitivePreference("theme")).isFalse()
+    }
+
+    /** The old quadratic inLocalOrder: the linked-list one must give the same order. */
+    private fun oldInLocalOrder(merged: List<StoredTrack>, local: List<StoredTrack>, remote: List<StoredTrack>): List<StoredTrack> {
+        val byKey = merged.associateBy(BackupMerge::trackKey)
+        val outKeys = local.map(BackupMerge::trackKey).filter { it in byKey }.distinct().toMutableList()
+        var after = -1
+        for (key in remote.map(BackupMerge::trackKey)) {
+            val at = outKeys.indexOf(key)
+            if (at >= 0) after = at else if (key in byKey) outKeys.add(++after, key)
+        }
+        return outKeys.map(byKey::getValue)
+    }
+
+    @Test
+    fun `linear track order matches the old one`() {
+        val random = java.util.Random(42)
+        repeat(2_000) {
+            fun some() = List(random.nextInt(12)) { t("t${random.nextInt(15)}") }
+            val merged = some()
+            val local = some()
+            val remote = some()
+            assertThat(BackupMerge.inLocalOrder(merged, local, remote)).isEqualTo(oldInLocalOrder(merged, local, remote))
+        }
+    }
 }

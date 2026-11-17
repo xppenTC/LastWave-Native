@@ -483,6 +483,9 @@ class LosslessMusicApi @Inject constructor(
         private val DIACRITICS = Regex("(?<=\\p{Script=Latin})\\p{M}+")
         private val NON_ALPHANUMERIC = Regex("[^\\p{L}\\p{N}\\p{M}]+")
         private val MULTI_SPACE = Regex("\\s+")
+        // Compiled once: these ran on every resolution and on every scored candidate.
+        private val DASH_PUNCTUATION = Regex("""\s*[-–—:|]+\s*""")
+        private val ALBUM_WORD_SEPARATORS = Regex("""[\s.·/-]+""")
 
         fun normalizeText(raw: String): String = Normalizer.normalize(raw, Normalizer.Form.NFD)
             .replace(DIACRITICS, "")
@@ -996,7 +999,7 @@ class LosslessMusicApi @Inject constructor(
         val headTitle = parseTitle(title, cleanArtist, expectedAlbum, headIsTitle = true)
             .let { (it.words + it.versions).joinToString(" ") }
         // Tidal needs "Don't", not "dont"; a " - " in a query returns nothing.
-        val punctuatedTitle = cleanTitle.replace(Regex("""\s*[-–—:|]+\s*"""), " ")
+        val punctuatedTitle = cleanTitle.replace(DASH_PUNCTUATION, " ")
 
         val artistList = cleanArtist.split(ARTIST_SEPARATORS)
             .map { cleanForSearch(it) }
@@ -1706,7 +1709,7 @@ class LosslessMusicApi @Inject constructor(
             // nothing about whose recording it is (Sofiane's "Dingue de toi" is not Djifason's).
             val titleWords = (wanted.words + got.words).toSet()
             fun albumWords(album: String) = album.lowercase(Locale.ROOT)
-                .split(Regex("""[\s.·/-]+"""))
+                .split(ALBUM_WORD_SEPARATORS)
                 .map { it.replace(NON_ALPHANUMERIC, "") }
                 .filter { it.length > 2 && it !in titleWords && it !in NOISE_WORDS }
                 .toSet()

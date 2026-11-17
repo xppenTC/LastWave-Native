@@ -314,7 +314,7 @@ private fun AlbumContent(
         }
         val multiDisc = album.tracks.mapNotNull { it.disc }.distinct().size > 1
         itemsIndexed(album.tracks, key = { _, t -> t.pagePath }) { index, track ->
-            val playing = playingUrl == KhInsiderParser.playbackUri(track.pagePath)
+            val playing = playingUrl == remember(track.pagePath) { KhInsiderParser.playbackUri(track.pagePath) }
             val accent = playing
             Row(
                 modifier = Modifier

@@ -1,5 +1,6 @@
 package com.lastwave.app.data.playlist
 
+import android.app.Application
 import com.lastwave.app.data.spotify.SpotifyAuthRepository
 import io.mockk.coEvery
 import io.mockk.mockk
@@ -13,8 +14,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33], manifest = Config.NONE, application = Application::class)
 class SpotifyLikedPagingTest {
     private val total = 1203
     private var rateLimitedOnce = false

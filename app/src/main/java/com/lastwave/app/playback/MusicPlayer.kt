@@ -1260,6 +1260,25 @@ class MusicPlayer @Inject constructor(
             val videoId = rejectedYouTubeCandidate?.videoId ?: trackVideoId
             val httpStatus = error.httpStatusCodeOrNull()
 
+            // A KHInsider track streams from the site: a network blip or a Cloudflare hiccup
+            // gets a few retries from the same spot (the resolver reads the page again),
+            // never the YouTube retry below, which would look up title + game name.
+            val khStream = player.currentMediaItem?.localConfiguration?.uri?.scheme == "khinsider"
+            if (khStream && errorRetryCount < KH_STREAM_RETRIES && failedIndex in 0 until player.mediaItemCount) {
+                val attempt = ++errorRetryCount
+                android.util.Log.i("MusicPlayer", "KHInsider stream failed for '${currentTrack?.title}', retry $attempt at ${currentPos}ms")
+                applicationScope.launch {
+                    delay(attempt * KH_STREAM_RETRY_DELAY_MS)
+                    onMain {
+                        if (player.currentMediaItem?.mediaId != failedMediaId) return@onMain
+                        player.prepare()
+                        player.seekTo(failedIndex, currentPos)
+                        player.play()
+                    }
+                }
+                return
+            }
+
             if (isGenuineLocal) {
                 _state.update { it.copy(error = error.message ?: "Local file playback error (${error.errorCodeName})", isPlaying = false, isBuffering = false) }
                 scheduleUnavailableMediaSkip(failedIndex, failedMediaId, failure = error, allowAutoSkip = !playedAudibly)
@@ -3455,7 +3474,8 @@ class MusicPlayer @Inject constructor(
     private fun retryInterruptedPlayback(): Boolean {
         val snapshot = _state.value
         val track = snapshot.current ?: return false
-        if (snapshot.error == null || track.isLocalTrack()) return false
+        // A KHInsider stream comes back with the network like a YouTube one.
+        if (snapshot.error == null || (track.isLocalTrack() && !com.lastwave.app.data.generate.isKhInsiderUrl(track.playbackUrl))) return false
         errorRetryCount = 0
         val queue = snapshot.queue.ifEmpty { listOf(track) }
         startResolvedQueuePlayback(
@@ -8840,6 +8860,8 @@ class MusicPlayer @Inject constructor(
             fallbackMime = track.playbackMimeType,
             knownDurationMs = track.durationMs,
         )
+        // A KHInsider read goes over the network: the user may have skipped meanwhile.
+        if (_state.value.current?.playbackUrl != queuedUrl) return
         _state.update {
             it.copy(
                 audioCodec = inspected.badge,
@@ -9121,6 +9143,8 @@ class MusicPlayer @Inject constructor(
         /** A failure at/after this position means the track audibly played,
          *  so it must hold with tap-to-retry instead of auto-skipping. */
         const val MIN_AUDIBLE_PLAYBACK_MS = 1_000L
+        const val KH_STREAM_RETRIES = 3
+        const val KH_STREAM_RETRY_DELAY_MS = 2_000L
         /** Tail window where a pinned READY+playWhenReady state counts as a
          *  missed natural advance and triggers the lossless-first watchdog. */
         const val END_OF_TRACK_STALL_THRESHOLD_MS = 750L
@@ -9348,6 +9372,8 @@ fun GeneratedTrack.toPlayableTrack(): PlayableTrack {
             album = album,
             artworkUrl = artworkUrl,
             playbackUrl = url,
+            durationMs = durationMs,
+            trackNumber = trackNumber,
         )
     }
     val videoId = youtubeVideoIdOrNull()
