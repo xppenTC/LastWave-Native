@@ -412,6 +412,7 @@ class MusicPlayer @Inject constructor(
     /** Same, for the inaudible-but-rendering branch + its position cursor. */
     private var inaudibleSinceMs = 0L
     private var lastAdvancingPositionMs = -1L
+    private var lastMusicActiveCheckMs = 0L
     /** Recovery attempts per mediaId, so a hopeless window stops at 2 and
      *  the existing error/unavailable machinery owns it from there. */
     private val silentRecoveries = mutableMapOf<String, Int>()
@@ -1117,6 +1118,14 @@ class MusicPlayer @Inject constructor(
             // paths don't record â€” manual seeks arrive as SEEK, not AUTO.
             if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
                 recordHistory(_state.value.current?.mediaIdKey())
+                // Repeat-all + shuffle wrapped to the first shuffled song: deal a
+                // new order, or every round replays the same "shuffled" sequence.
+                if (player.shuffleModeEnabled && player.repeatMode == Player.REPEAT_MODE_ALL &&
+                    player.mediaItemCount > 2 &&
+                    player.currentMediaItemIndex == player.currentTimeline.getFirstWindowIndex(true)
+                ) {
+                    reshuffleFrom(player.currentMediaItemIndex)
+                }
             }
             losslessBypassMediaIds.retainAll(setOf(mediaItem.mediaId))
             silentRecoveries.remove(mediaItem.mediaId)
@@ -1984,6 +1993,7 @@ class MusicPlayer @Inject constructor(
                         effects.attach(audioSessionId)
                         runCatching { systemEffectsBridge.onSessionChanged(audioSessionId) }
                         musicHapticsController.onAudioSessionIdChanged(audioSessionId)
+                        com.lastwave.app.playback.rhythm.FluidRhythmEngine.attachSession(audioSessionId)
                     }
                 })
             }.also { playerInstance ->
@@ -2068,6 +2078,7 @@ class MusicPlayer @Inject constructor(
     @MainThread
     fun release() {
         cancelCrossfade()
+        com.lastwave.app.playback.rhythm.FluidRhythmEngine.detachSession()
         activePlayer?.removeListener(listener)
         activePlayer?.release()
         activePlayer = null
@@ -2147,7 +2158,6 @@ class MusicPlayer @Inject constructor(
                     // at 0:00 while the notification looked normal. Paused /
                     // ended states still freeze via isPlaying=false.
                     if (!isCasting) {
-                        val livePlaying = player.isPlaying
                         val playingNow = _state.value.isPlaying &&
                             !exclusiveUsbOutput.isPaused() &&
                             usbAlive
@@ -3126,6 +3136,21 @@ class MusicPlayer @Inject constructor(
         }
     }
 
+    /**
+     * "Start Mix": the playing song carries on untouched and everything after
+     * it becomes [tracks]. One main-thread step, so nothing can be queued
+     * between the clear and the append; clearing also stops radio/discover
+     * from refilling the queue around the mix. With nothing playing, the
+     * append starts the mix itself.
+     */
+    fun replaceUpcoming(tracks: List<PlayableTrack>) {
+        if (tracks.isEmpty()) return
+        onMain {
+            clearUpcoming()
+            appendTracksToQueue(tracks)
+        }
+    }
+
     /** Adds the varied continuation loaded for a search-started track.
      * A stale response can never modify a newer playback queue. */
     fun appendSearchRecommendations(seed: PlayableTrack, tracks: List<PlayableTrack>) {
@@ -3876,15 +3901,18 @@ class MusicPlayer @Inject constructor(
         if (player.shuffleModeEnabled == enabled && _state.value.shuffleEnabled == enabled) return@onMain
         cancelCrossfade()
         if (enabled && player.mediaItemCount > 1) {
-            val current = player.currentMediaItemIndex.takeIf { it in 0 until player.mediaItemCount } ?: 0
-            val rest = shuffledUnplayedFirst((0 until player.mediaItemCount).filter { it != current }) { player.getMediaItemAt(it).mediaId }
-            val order = (listOf(current) + rest).toIntArray()
-            player.setShuffleOrder(DefaultShuffleOrder(order, Random.nextLong()))
+            reshuffleFrom(player.currentMediaItemIndex.takeIf { it in 0 until player.mediaItemCount } ?: 0)
         }
         player.shuffleModeEnabled = enabled
         preloadNextQueueItem(player.currentMediaItemIndex)
         _state.update { it.copy(shuffleEnabled = enabled) }
         persistPlaybackSession()
+    }
+
+    /** A fresh shuffle order that keeps [current] playing first. */
+    private fun reshuffleFrom(current: Int) {
+        val rest = shuffledUnplayedFirst((0 until player.mediaItemCount).filter { it != current }) { player.getMediaItemAt(it).mediaId }
+        player.setShuffleOrder(DefaultShuffleOrder((listOf(current) + rest).toIntArray(), Random.nextLong()))
     }
 
     fun cycleRepeatMode() = setRepeatMode(
@@ -5213,7 +5241,8 @@ class MusicPlayer @Inject constructor(
                 return
             } else if (isRepeatAll && player.mediaItemCount > 0) {
                 nextIndex = if (player.shuffleModeEnabled) {
-                    timeline.getFirstWindowIndex(true).takeIf { it != C.INDEX_UNSET } ?: 0
+                    (timeline.getFirstWindowIndex(true).takeIf { it != C.INDEX_UNSET } ?: 0)
+                        .also { if (player.mediaItemCount > 2) reshuffleFrom(it) }
                 } else {
                     0
                 }
@@ -5259,6 +5288,7 @@ class MusicPlayer @Inject constructor(
         lastRenderPositionMs = -1L
         lastRenderBufferedMs = -1L
         lastAdvancingPositionMs = -1L
+        lastMusicActiveCheckMs = 0L
     }
 
     /**
@@ -5341,7 +5371,11 @@ class MusicPlayer @Inject constructor(
         // Rendering branch: position must be advancing (else the parked
         // branch above owns it) with no active music stream behind it.
         renderStallSinceMs = 0L
-        val directOutputBypass = exclusiveUsbOutput.isActive() || internalDirectOutput.isActive()
+        // isMusicActive is a binder call; at the 60 ms full-player cadence it
+        // was most of the main thread's playback work. 1 s is plenty for a 10 s timeout.
+        if (nowMs - lastMusicActiveCheckMs < MUSIC_ACTIVE_CHECK_INTERVAL_MS) return
+        lastMusicActiveCheckMs = nowMs
+        val directOutputBypass =exclusiveUsbOutput.isActive() || internalDirectOutput.isActive()
         val musicActive = directOutputBypass || runCatching { audioManager?.isMusicActive == true }.getOrDefault(true)
         if (posNow == lastAdvancingPositionMs || musicActive) {
             lastAdvancingPositionMs = posNow
@@ -5705,7 +5739,7 @@ class MusicPlayer @Inject constructor(
             unavailableMediaIds += failedMediaId
             if (!hasTimeline) {
                 unavailableSkipJob = null
-                val nextIndex = nextQueueIndex(snapshot)
+                val nextIndex = nextQueueIndex(snapshot, wrap = snapshot.repeatMode == Player.REPEAT_MODE_ALL)
                 if (nextIndex == C.INDEX_UNSET) {
                     player.pause()
                     player.stop()
@@ -5729,7 +5763,9 @@ class MusicPlayer @Inject constructor(
                 visited++
             }
             if (visited >= player.mediaItemCount) nextIndex = C.INDEX_UNSET
-            if (nextIndex == C.INDEX_UNSET && player.mediaItemCount > 1) {
+            // Wrap past the end only on repeat-all: a failed last song used to
+            // restart the playlist from the top even with repeat off.
+            if (nextIndex == C.INDEX_UNSET && player.mediaItemCount > 1 && repeatMode == Player.REPEAT_MODE_ALL) {
                 val candidateIndices = if (player.shuffleModeEnabled) {
                     shuffledUnplayedFirst((0 until player.mediaItemCount).toList()) { player.getMediaItemAt(it).mediaId }
                 } else {
@@ -8197,6 +8233,7 @@ class MusicPlayer @Inject constructor(
             activePlayer = standby
             musicHapticsController.bindToPlayer(standby)
             musicHapticsController.onAudioSessionIdChanged(standby.audioSessionId)
+            com.lastwave.app.playback.rhythm.FluidRhythmEngine.attachSession(standby.audioSessionId)
             standby.addListener(listener)
             committed = true
             standbyQueue = emptyList()
@@ -8927,8 +8964,6 @@ class MusicPlayer @Inject constructor(
     }
 
     companion object {
-        private const val EXCLUSIVE_DRIFT_ABORT_PPM = 20_000.0
-        private const val EXCLUSIVE_DRIFT_ABORT_TICKS = 2
         /**
          * Fallback target when the DAC descriptor lacks the source rate.
          * Resamples to a clock rate supported by the DAC (including 48kHz, 96kHz, etc.)
@@ -8993,14 +9028,7 @@ class MusicPlayer @Inject constructor(
         const val DISCOVER_QUEUE_REFILL_THRESHOLD = 8
         const val RADIO_QUEUE_BATCH_SIZE = 35
         const val RADIO_QUEUE_REFILL_THRESHOLD = 14
-        const val POSITION_PERSIST_INTERVAL_MS = 5_000L
-        const val MAX_PERSISTED_QUEUE_SIZE = 200
-        const val RESTORED_PREVIOUS_TRACKS = 50
         const val PLAYBACK_PREFERENCES_NAME = "lastwave_playback_session"
-        const val PLAYBACK_SESSION_KEY = "active_session"
-        /** Persisted Bit-Perfect volume session (survives process restarts). */
-        const val KEY_VOLUME_MANAGED = "bitperfect_volume_managed"
-        const val KEY_VOLUME_SAVED = "bitperfect_volume_saved"
         /** Ticker-driven session persistence cadence (explicit state changes persist immediately). */
         const val TICKER_PERSIST_INTERVAL_MS = 2_000L
         /** Collapsed-player cadence: the mini bar updates at 4 fps. */
@@ -9103,21 +9131,6 @@ class MusicPlayer @Inject constructor(
         const val TAIL_PIN_TIMEOUT_MS = 5_000L
         /** Debounce so STATE_ENDED + ticker watchdog can't churn generations. */
         const val AUTO_ADVANCE_DEBOUNCE_MS = 3_000L
-        /** Buffered lead kept for the crossfade standby: the next track is
-         *  resolved and prepared this far ahead of the fade window, so the
-         *  hand-off only ever has to wait for STATE_READY. */
-        const val CROSSFADE_ARM_LEAD_MS = 10_000L
-        /** Extra headroom on top of [CROSSFADE_ARM_LEAD_MS] for re-requesting a
-         *  next-track stream whose signed URL is dead or inside the expiry
-         *  margin. Provider modules / addons mint short-TTL FLAC URLs, so a
-         *  resolve started at track start reads expired by the time the window
-         *  opens; re-requesting at the window edge left no time to prepare and
-         *  turned every such fade into a hard cut. */
-        const val CROSSFADE_PREP_REFRESH_LEAD_MS = 30_000L
-        /** Rate limit for the per-tick crossfade decision log. */
-        const val CROSSFADE_LOG_THROTTLE_MS = 5_000L
-        /** Minimum gap between next-track resolve kicks for the same item. */
-        const val CROSSFADE_RESOLVE_RETRY_MS = 8_000L
         /** Poll cadence used while the downloader yields to an armed standby. */
         const val CURRENT_TRACK_CACHE_STANDBY_YIELD_MS = 500L
         /** UI-playing but ExoPlayer frozen (pos + buffer) this long means a
@@ -9130,6 +9143,7 @@ class MusicPlayer @Inject constructor(
          *  second or two). User-muted-to-zero still counts as active, so
          *  this never fires on a deliberately silent phone. */
         const val INAUDIBLE_TIMEOUT_MS = 10_000L
+        const val MUSIC_ACTIVE_CHECK_INTERVAL_MS = 1_000L
         /** Renderer-reset, then re-resolve. Beyond that the error/unavailable
          *  machinery owns the window â€” never loop recovery forever. */
         const val MAX_SILENT_RECOVERIES = 2

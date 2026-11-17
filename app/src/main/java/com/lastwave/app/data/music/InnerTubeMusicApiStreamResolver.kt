@@ -135,9 +135,7 @@ internal suspend fun InnerTubeMusicApi.resolveAudioStreamImpl(
             // Hard cap on one full resolution: without it a bad network could
             // chain every fallback stage into a 60-90s wait before the caller
             // ever got a chance to retry with fresh state.
-            kotlinx.coroutines.withTimeoutOrNull(STREAM_RESOLVE_TOTAL_TIMEOUT_MS) {
-                shared.deferred.await()
-            } ?: throw IOException("Timed out resolving audio stream for $videoId")
+            shared.deferred.awaitSharedStream(STREAM_RESOLVE_TOTAL_TIMEOUT_MS, videoId)
         } finally {
             shared.waiters.decrementAndGet()
             // Do not cancel the shared deferred when the last waiter leaves.
@@ -887,6 +885,9 @@ internal suspend fun InnerTubeMusicApi.resolveDirectClientStream(
                 // bitrate, so bitrate alone kept picking the quiet variant.
                 compareBy<YouTubeAudioStream> { it.isDrc }
                     .thenBy { it.isAdaptive }
+                    // Opus (webm) before AAC: at YouTube's ~130-160 kbps it is the
+                    // better codec, and listed bitrates differ by only a few kbps.
+                    .thenByDescending { it.mimeType?.contains("webm", ignoreCase = true) == true }
                     .thenByDescending { it.bitrate },
             )
         noteAttempt("client=${client.name} compatibleCandidates=${candidates.size} cipherAllowed=$allowCipherFormats")
@@ -943,8 +944,12 @@ internal suspend fun InnerTubeMusicApi.probeStream(
                 val validType = !contentType.contains("text/html") &&
                     !contentType.contains("application/json") &&
                     !contentType.contains("text/plain")
+                // PROBE_READ_BYTES (or the range's end) must actually arrive: a body
+                // that stalls after its headers throws on the call timeout instead.
+                val source = response.body?.source()
                 val valid = (response.code == 200 || response.code == 206) &&
-                    validType && response.body?.source()?.request(1L) == true
+                    validType && source != null && source.request(1L) &&
+                    run { source.request(PROBE_READ_BYTES); true }
                 Triple(response.code, contentType, valid)
             }
             logStreamEvent(
@@ -1149,9 +1154,6 @@ internal suspend fun InnerTubeMusicApi.findBestMatchImpl(
             limit = 30,
             prefetchStreams = prefetchStreams,
         )
-        val validCandidates = results.filter {
-            it.videoId.isNotBlank() && it.videoId != excludedVideoId && it.videoId !in excludedVideoIds
-        }
         val isCandidateMatch: (YouTubeMusicTrack) -> Boolean = { candidate ->
             // Hard vetoes first: a different take (live/remix/cover/sped up…)
             // or a runtime far from the catalog's is never the same recording,
@@ -1169,26 +1171,29 @@ internal suspend fun InnerTubeMusicApi.findBestMatchImpl(
                     normalize(cleanArtist).contains(normalize(candidate.artist)) ||
                     // "P.L.L" is credited as "PLL".
                     normalize(candidate.artist).replace(" ", "").contains(normalize(cleanArtist).replace(" ", "")) ||
-                    normalize(candidate.title).contains(normalize(cleanArtist)))
+                    normalize(candidate.title).contains(normalize(cleanArtist)) ||
+                    // Sources often credit the composer while YTM credits the singers.
+                    TextMatch.isRuntimeConfirmedTitleMatch(candidate.title, title, expectedDurationMs, candidate.durationSeconds))
         }
-        val baseBest = validCandidates.asSequence()
+        fun pick(found: List<YouTubeMusicTrack>): YouTubeMusicTrack? = found.asSequence()
+            .filter { it.videoId.isNotBlank() && it.videoId != excludedVideoId && it.videoId !in excludedVideoIds }
             .filter(isCandidateMatch)
             .maxByOrNull { candidate -> TextMatch.matchScore(candidate, title, cleanArtist, expectedDurationMs) }
+        val baseBest = pick(results)
         // The base query has no "(Noiseflow & Triple X Remix)": that remix only turns up
         // searching the full title, and another remix must not stand in for it.
         val needsFullTitle = baseBest == null ||
             TextMatch.versionNames(title).any { it !in tokens(baseBest.title) }
-        val fullTitleMatches = if (needsFullTitle && searchTitle != title.trim()) {
-            searchSongs(
-                query = listOf(title.trim(), cleanArtist).filter { it.isNotBlank() }.joinToString(" "),
-                limit = 30,
-                prefetchStreams = prefetchStreams,
-            ).filter {
-                it.videoId.isNotBlank() && it.videoId != excludedVideoId && it.videoId !in excludedVideoIds
-            }.filter(isCandidateMatch)
-        } else emptyList()
-        val best = (fullTitleMatches + listOfNotNull(baseBest))
-            .maxByOrNull { candidate -> TextMatch.matchScore(candidate, title, cleanArtist, expectedDurationMs) }
+        // Like other YTM clients, retry with looser queries: the full title, then the
+        // title alone (a wrong artist credit in the query can push the song out of the results).
+        val fallbackQueries = if (!needsFullTitle) emptyList() else listOf(
+            listOf(title.trim(), cleanArtist).filter { it.isNotBlank() }.joinToString(" "),
+            searchTitle,
+        ).distinct().filter { it != query }
+        val fallbackBest = fallbackQueries.firstNotNullOfOrNull { fallback ->
+            pick(searchSongs(query = fallback, limit = 30, prefetchStreams = prefetchStreams))
+        }
+        val best = pick(listOfNotNull(fallbackBest, baseBest))
             ?: throw IOException("No reliable YouTube Music match found for $title by $artist")
         return best.also {
             if (matchCache.size > MAX_MATCH_CACHE_ENTRIES) matchCache.clear()
@@ -1200,8 +1205,9 @@ internal suspend fun InnerTubeMusicApi.findBestMatchOrNullImpl(
         title: String,
         artist: String,
         prefetchStreams: Boolean = false,
+        expectedDurationMs: Long? = null,
     ): YouTubeMusicTrack? = try {
-        findBestMatchImpl(title, artist, prefetchStreams)
+        findBestMatchImpl(title, artist, prefetchStreams, expectedDurationMs = expectedDurationMs)
     } catch (cancellation: kotlinx.coroutines.CancellationException) {
         throw cancellation
     } catch (_: Exception) {

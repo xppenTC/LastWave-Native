@@ -2,6 +2,7 @@
 
 package com.lastwave.app.ui.player
 
+import com.lastwave.app.data.local.SeekbarStyle
 import androidx.compose.material.icons.outlined.AddCircleOutline
 import androidx.compose.material.icons.filled.CheckCircle
 import com.lastwave.app.data.playlist.isLikedIn
@@ -42,19 +43,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.animateIntAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.graphics.lerp
 import kotlin.math.cos
@@ -322,7 +311,6 @@ import com.lastwave.app.ui.theme.Backdrop
 import com.lastwave.app.ui.theme.rememberLayerBackdrop
 import android.graphics.Bitmap
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.toArgb
@@ -386,14 +374,21 @@ fun PlayerHost(
     val playbackState by viewModel.player.stateWithoutProgress.collectAsStateWithLifecycle()
     val activeDownloads by viewModel.activeDownloads.collectAsStateWithLifecycle()
     var expanded by rememberSaveable { mutableStateOf(false) }
-    DisposableEffect(expanded) {
-        com.lastwave.app.playback.PlaybackUiDemand.needsHighFrequency = expanded
+    var currentTab by rememberSaveable { mutableStateOf(FullPlayerTab.NOW_PLAYING) }
+    // Lyrics shown inline on Now Playing. Kept beside currentTab, not as a tab,
+    // so the regular lyrics tab returns to it on back.
+    var playerLyrics by rememberSaveable { mutableStateOf(false) }
+    // Only line-synced lyrics need the 60 ms playhead; on Now Playing each
+    // tick redrew the whole full player to move the seek bar under a pixel.
+    val lyricsOpen = expanded &&
+        (currentTab == FullPlayerTab.LYRICS || (currentTab == FullPlayerTab.NOW_PLAYING && playerLyrics))
+    DisposableEffect(lyricsOpen) {
+        com.lastwave.app.playback.PlaybackUiDemand.needsHighFrequency = lyricsOpen
         onDispose { com.lastwave.app.playback.PlaybackUiDemand.needsHighFrequency = false }
     }
-    var currentTab by rememberSaveable { mutableStateOf(FullPlayerTab.NOW_PLAYING) }
     var playlistTrack by remember { mutableStateOf<PlayableTrack?>(null) }
     val settings by viewModel.settings.collectAsStateWithLifecycle()
-    val keepLyricsAwake = expanded && currentTab == FullPlayerTab.LYRICS && settings.keepLyricsScreenAwake
+    val keepLyricsAwake = lyricsOpen && settings.keepLyricsScreenAwake
     val currentView = androidx.compose.ui.platform.LocalView.current
     DisposableEffect(keepLyricsAwake) {
         if (keepLyricsAwake) {
@@ -422,6 +417,7 @@ fun PlayerHost(
     LaunchedEffect(expanded) {
         if (!expanded) {
             currentTab = FullPlayerTab.NOW_PLAYING
+            playerLyrics = false
         }
     }
     LaunchedEffect(Unit) {
@@ -510,6 +506,10 @@ fun PlayerHost(
     val morphCardColor = MaterialTheme.colorScheme.surfaceContainerHigh
 
     val bottomNavSlot = remember { mutableStateOf<BottomNavigationContent>({ _ -> }) }
+    // Off: progress stays at 0, which is the classic full bar + full mini player layout.
+    val chromeCollapse = rememberChromeCollapseState(enabled = hasBottomNavigation && settings.collapsingNavBar)
+    // While docking, the card slides down over the fading bar, not under it.
+    val chromeDocking by remember { derivedStateOf { chromeCollapse.progress() > 0f } }
     LaunchedEffect(viewModel) {
         viewModel.toastMessage.collect { msg ->
             android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
@@ -530,6 +530,7 @@ fun PlayerHost(
             0.dp
         },
         LocalBottomNavSlot provides bottomNavSlot,
+        LocalChromeCollapse provides chromeCollapse,
         LocalLiquidGlassBackdrop provides (if (miniGlass) miniBackdrop else null),
     ) {
         Box(
@@ -558,6 +559,11 @@ fun PlayerHost(
                 }
             }
             if (state.current != null && !settings.buttonNowPlayingEnabled && !hideMiniPlayer && showMiniPlayer) {
+                val miniBottomPadding = if (hasBottomNavigation) {
+                    if (material3NavigationEnabled) 84.dp else 80.dp
+                } else {
+                    14.dp
+                }
                 MiniPlayer(
                     state = state,
                     progressState = viewModel.miniProgressState,
@@ -566,11 +572,7 @@ fun PlayerHost(
                     onPrevious = viewModel.player::previous,
                     onNext = viewModel.player::next,
                     onClose = viewModel.player::stopAndClear,
-                    bottomPadding = if (hasBottomNavigation) {
-                        if (material3NavigationEnabled) 84.dp else 80.dp
-                    } else {
-                        14.dp
-                    },
+                    bottomPadding = miniBottomPadding,
                     edgeToEdge = !hasBottomNavigation,
                     backdrop = if (miniGlass) miniBackdrop else null,
                     onCardBounds = { rootBounds ->
@@ -578,15 +580,17 @@ fun PlayerHost(
                             miniCardBounds = rootBounds.translate(-hostOrigin)
                         }
                     },
+                    compactProgress = chromeCollapse.progress,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .zIndex(if (miniOnTop) 1f else 0f)
+                        .zIndex(if (miniOnTop || chromeDocking) 1f else 0f)
                         .graphicsLayer {
                             val p = playerExpansion.value.coerceIn(0f, 1f)
                             alpha = (1f - p * 2.2f).coerceIn(0f, 1f)
                             // Follow the morphing card's top edge as it rises.
                             translationY = -(miniCardBounds?.top ?: 0f) * p
-                        },
+                        }
+                        .dockBesidePill(miniBottomPadding, chromeCollapse.progress),
                 )
             }
 
@@ -659,12 +663,15 @@ fun PlayerHost(
                     ) {
                         PredictiveBackScreen(
                             enabled = expanded && state.current != null && currentTab == FullPlayerTab.NOW_PLAYING,
-                            onBack = { expanded = false },
+                            // The player's only back handler: leave Player Lyrics first, then close.
+                            onBack = { if (playerLyrics) playerLyrics = false else expanded = false },
                         ) {
                             ExpandedPlayer(
                                 viewModel = viewModel,
                                 currentTab = currentTab,
                                 onTabChange = { currentTab = it },
+                                playerLyrics = playerLyrics,
+                                onPlayerLyricsChange = { playerLyrics = it },
                                 onRetryLyrics = viewModel::retryLyrics,
                                 onCollapse = { expanded = false },
                                 onOpenArtist = { artist ->
@@ -727,6 +734,8 @@ internal fun ExpandedPlayer(
     viewModel: PlayerViewModel,
     currentTab: FullPlayerTab,
     onTabChange: (FullPlayerTab) -> Unit,
+    playerLyrics: Boolean,
+    onPlayerLyricsChange: (Boolean) -> Unit,
     onRetryLyrics: () -> Unit,
     onCollapse: () -> Unit,
     onOpenArtist: (String) -> Unit,
@@ -752,13 +761,17 @@ internal fun ExpandedPlayer(
         lyricsState = lyricsState,
         lyricsProviderStatuses = lyricsProviderStatuses,
         onProbeLyricsProviders = viewModel::probeLyricsProviders,
+        seekbarStyle = settings.seekbarStyle,
         wavySeekbarEnabled = settings.wavySeekbarEnabled,
         rotatingBackgroundEnabled = settings.rotatingBackgroundEnabled,
         lyricsRotatingBackgroundEnabled = settings.lyricsRotatingBackgroundEnabled,
+        fluidBeatSyncEnabled = settings.fluidBeatSyncEnabled,
         lyricsOffsetMs = lyricsOffsetMs,
         onSetLyricsOffsetMs = viewModel::setLyricsOffsetMs,
         lyricsFontScale = settings.lyricsFontScale,
         onSetLyricsFontScale = viewModel::setLyricsFontScale,
+        lyricsCentered = settings.lyricsCentered,
+        onSetLyricsCentered = viewModel::setLyricsCentered,
         lyricsButtonsAutoHideSeconds = settings.lyricsButtonsAutoHideSeconds,
         translationLanguage = settings.translationLanguage,
         canvas = canvas,
@@ -769,6 +782,8 @@ internal fun ExpandedPlayer(
         showAutoEqInVolumePanel = settings.showAutoEqInVolumePanel,
         currentTab = currentTab,
         onTabChange = onTabChange,
+        playerLyrics = playerLyrics,
+        onPlayerLyricsChange = onPlayerLyricsChange,
         onRetryLyrics = onRetryLyrics,
         onCollapse = onCollapse,
         onOpenArtist = onOpenArtist,

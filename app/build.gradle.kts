@@ -248,8 +248,8 @@ android {
         buildConfigField("boolean", "VIVO_ORIGIN", vivoOrigin.toString())
         minSdk = (project.findProperty("minSdk") as? String)?.toIntOrNull() ?: 29
         targetSdk = 35
-        versionCode = 32
-        versionName = "5.2.0-bypass"
+        versionCode = 33
+        versionName = "5.2.1-bypass"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         (project.findProperty("targetAbis") as? String)?.let { prop ->
@@ -542,7 +542,7 @@ dependencies {
 
     // Unit Testing dependencies
     testImplementation("junit:junit:4.13.2")
-    testImplementation("com.google.truth:truth:1.4.2")
+    testImplementation("com.google.truth:truth:1.4.5")
     testImplementation("org.robolectric:robolectric:4.12.2")
     testImplementation("io.mockk:mockk:1.13.10")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
@@ -577,6 +577,9 @@ configurations.all {
 
 tasks.withType<Test> {
     maxHeapSize = "2048m"
+    javaLauncher.set(project.extensions.getByType<org.gradle.jvm.toolchain.JavaToolchainService>().launcherFor {
+        languageVersion.set(org.gradle.jvm.toolchain.JavaLanguageVersion.of(17))
+    })
 }
 
 val nativeVaultFp = MessageDigest.getInstance("SHA-256")

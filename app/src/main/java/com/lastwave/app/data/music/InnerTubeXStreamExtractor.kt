@@ -15,11 +15,14 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.intrinsics.COROUTINE_SUSPENDED
+import kotlin.coroutines.intrinsics.startCoroutineUninterceptedOrReturn
+import com.lastwave.app.data.music.potoken.BotGuardTokenGenerator
 import kotlin.coroutines.resume
 import kotlin.jvm.functions.Function1
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.json.Json
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import com.lastwave.app.data.ytmusic.YtMusicAuthManager
@@ -67,13 +70,18 @@ class InnerTubeXStreamExtractor @Inject constructor(
             // clients need to play a whole song. With it off, InnerTubeX
             // skipped those clients entirely.
             val constrainedHints = withCapabilities.invoke(hints, true, false, true)
-            val quality = if (maxBitrateBps == null) "HIGH" else "LOW"
+            // AUTO ranks Opus (webm) first, then the best of it; HIGH is a plain
+            // max-by-listed-bitrate that kept landing on AAC 128 (itag 140) when
+            // YouTube listed it a few kbps above Opus. HIGH only matters for
+            // InnerTubeX's Premium path, which is not used here.
+            val quality = if (maxBitrateBps == null) "AUTO" else "LOW"
             val audioQuality = enumValue("com.metrolist.innertubex.extraction.AudioQuality", quality)
             val now = System.currentTimeMillis()
             failedProfilesUntil.entries.removeIf { it.value <= now }
             val excludedProfiles = failedProfilesUntil
                 .filter { (key, expiry) -> key.startsWith("$videoId|$authScope|") && expiry > now }
                 .mapTo(mutableSetOf()) { it.key.substringAfterLast('|') }
+                .apply { addAll(APPLE_CLIENTS) }
             val extractMethod = stack.extractor.javaClass.methods.firstOrNull {
                 it.name == "extract" && it.parameterCount == 6
             } ?: return@withContext null
@@ -214,7 +222,37 @@ class InnerTubeXStreamExtractor @Inject constructor(
             ?: return
         failedProfilesUntil["$videoId|$authScope|$profile"] =
             System.currentTimeMillis() + CLIENT_FAILURE_COOLDOWN_MS
+        refreshCipherAfterRejection()
     }
+
+    /**
+     * A rejected URL can mean the signature/n tables went stale: the cipher
+     * produced a well-formed but wrong value, so nothing threw. Ask InnerTubeX
+     * to re-fetch its player config (it rate-limits this itself). When the
+     * table really changed, the clients cooled down on the old one deserve
+     * another try, so their exclusions are lifted.
+     */
+    private fun refreshCipherAfterRejection() {
+        val stack = runtime ?: return
+        cipherRefreshScope.launch {
+            try {
+                val refresh = stack.cipher.javaClass.methods.firstOrNull {
+                    it.name == "refreshAfterStreamRejection" && it.parameterCount == 1
+                } ?: return@launch
+                if (invokeSuspend(stack.cipher, refresh, emptyArray()) == true) {
+                    failedProfilesUntil.clear()
+                    Log.i(TAG, "player config changed after a stream rejection; client exclusions lifted")
+                }
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                Log.w(TAG, "cipher refresh after rejection failed (${error.javaClass.simpleName})")
+            }
+        }
+    }
+
+    private val cipherRefreshScope =
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
 
     private fun Any.toAudioStream(videoId: String, authScope: String): YouTubeAudioStream? {
         val url = readString(this, "getAudioUrl").orEmpty()
@@ -235,9 +273,10 @@ class InnerTubeXStreamExtractor @Inject constructor(
             .orEmpty()
         val clientName = readString(this, "getClientName").orEmpty()
         val profileId = readString(this, "getProfileId").orEmpty()
-        // iOS-family direct URLs need an iOS-attested GVS token we cannot
-        // supply: they stop with 403 about a minute in. Never accept one.
-        if (clientName.startsWith("IOS", ignoreCase = true) || clientName.startsWith("IPADOS", ignoreCase = true)) return null
+        // Apple-family direct URLs (iOS, iPadOS, visionOS) need an Apple-attested
+        // GVS token we cannot supply: they stop with 403 about a minute in.
+        // Excluded up front in [resolve]; never accept one that slips through.
+        if (APPLE_CLIENT_PREFIXES.any { clientName.startsWith(it, ignoreCase = true) }) return null
         val headers = rawHeaders.toMutableMap().apply {
             if (keys.none { it.equals("User-Agent", ignoreCase = true) }) {
                 diagnosticUserAgent(readValue(this@toAudioStream, "getStreamDiagnostics"), clientName, profileId)
@@ -291,12 +330,85 @@ class InnerTubeXStreamExtractor @Inject constructor(
             arrayOf(httpClient, innerTube, configStore),
             defaultMask = 24,
         )
-        val extractor = constructWithDefaults(
+        // Public constructor: (configParser, cipherService, innerTube,
+        // fallbackStrategy, tokenProvider, clientHealthMonitor, logger).
+        // With the token provider: strategy, health monitor and logger take
+        // their defaults (bits 3, 5, 6). Without one, the token too (bit 4).
+        val tokens = runCatching { poTokenProvider() }
+            .onFailure { Log.w(TAG, "BotGuard token provider unavailable; token-free clients only", it) }
+            .getOrNull()
+        val extractor = tokens?.let {
+            runCatching {
+                constructWithDefaults(
+                    "com.metrolist.innertubex.extraction.InnerTubeExtractor",
+                    arrayOf(parser, cipher, innerTube, null, it),
+                    defaultMask = 104,
+                )
+            }.onFailure { error -> Log.w(TAG, "InnerTubeX rejected the token provider; token-free clients only", error) }
+                .getOrNull()
+        } ?: constructWithDefaults(
             "com.metrolist.innertubex.extraction.InnerTubeExtractor",
             arrayOf(parser, cipher, innerTube),
             defaultMask = 120,
         )
         return RuntimeStack(innerTube, extractor, parser, cipher)
+    }
+
+    /**
+     * InnerTubeX's TokenProvider, backed by the app's own BotGuard minter
+     * ([BotGuardTokenGenerator], the WebView engine the legacy resolver already
+     * uses). Without one InnerTubeX rules out every client that needs a
+     * proof-of-origin token — the web clients — and falls back to token-free
+     * ones, some of which YouTube cuts off a minute into the song.
+     *
+     * The token work runs as the body of the suspend call itself
+     * (startCoroutineUninterceptedOrReturn on the caller's continuation), so
+     * InnerTubeX's own token timeout and cancellation reach the minter.
+     */
+    private fun poTokenProvider(): Any {
+        val type = Class.forName("com.metrolist.innertubex.extraction.TokenProvider")
+        val webBotGuard = enumValue("com.metrolist.innertubex.extraction.strategy.PoTokenProviderKind", "WEB_BOTGUARD")
+        val capabilities = Class.forName("com.metrolist.innertubex.extraction.TokenProviderCapabilities")
+            .getConstructor(Set::class.java, Boolean::class.javaPrimitiveType)
+            .newInstance(setOf(webBotGuard), true)
+        val newResult = Class.forName("com.metrolist.innertubex.extraction.PoTokenResult")
+            .getConstructor(String::class.java, String::class.java, String::class.java)
+        return java.lang.reflect.Proxy.newProxyInstance(type.classLoader, arrayOf(type)) { proxy, method, args ->
+            when (method.name) {
+                "getCapabilities" -> capabilities
+                "getPoToken" -> {
+                    val call = requireNotNull(args)
+                    val videoId = call[0] as String
+                    val visitorData = call[1] as String
+                    @Suppress("UNCHECKED_CAST")
+                    val caller = call.last() as Continuation<Any?>
+                    val mint: suspend () -> Any? = {
+                        if (visitorData.isBlank()) {
+                            null
+                        } else {
+                            BotGuardTokenGenerator.mintToken(videoId, visitorData)?.let { minted ->
+                                // InnerTubeX binds playerRequestToken to the visitor and
+                                // streamingDataToken to the video (PoTokenBinding).
+                                newResult.newInstance(minted.sessionToken, minted.playerToken, visitorData)
+                            }
+                        }
+                    }
+                    mint.startCoroutineUninterceptedOrReturn(caller)
+                }
+                "invalidateAttestation" -> {
+                    @Suppress("UNCHECKED_CAST")
+                    val caller = requireNotNull(args).last() as Continuation<Unit>
+                    val release: suspend () -> Unit = { BotGuardTokenGenerator.releaseForMemoryPressure() }
+                    release.startCoroutineUninterceptedOrReturn(caller)
+                }
+                // The resolver already pre-warms the engine with the real visitor.
+                "prewarm", "close" -> Unit
+                "equals" -> proxy === args?.firstOrNull()
+                "hashCode" -> System.identityHashCode(proxy)
+                "toString" -> "LastWaveBotGuardTokenProvider"
+                else -> null
+            }
+        }
     }
 
     /**
@@ -535,7 +647,15 @@ class InnerTubeXStreamExtractor @Inject constructor(
     private companion object {
         const val TAG = "InnerTubeXStreamExtractor"
         const val UNKNOWN_STREAM_EXPIRY_TTL_MS = 5 * 60 * 1_000L
-        const val CLIENT_FAILURE_COOLDOWN_MS = 60_000L
+        /** Long enough to outlast the song it failed on: at 60 s a client that
+         *  died a minute in was allowed straight back for the retry. */
+        const val CLIENT_FAILURE_COOLDOWN_MS = 5 * 60_000L
+        /** InnerTubeX catalogue ids/client names of the Apple family; it matches either. */
+        val APPLE_CLIENTS = setOf(
+            "VISIONOS", "VISIONOS_0_1", "VISIONOS_SABR",
+            "IOS", "IOS_SABR", "IOS_MUSIC", "IPADOS",
+        )
+        val APPLE_CLIENT_PREFIXES = listOf("IOS", "IPADOS", "VISIONOS")
         const val PLAYER_CONFIG_PREFS = "innertubex_player_config"
         const val PLAYER_CONFIG_URL =
             "https://raw.githubusercontent.com/MetrolistGroup/faraday/master/registry/player_configs.json"

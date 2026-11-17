@@ -1,6 +1,7 @@
 package com.lastwave.app.ui.settings
 
 import androidx.compose.material3.HorizontalDivider
+import com.lastwave.app.data.local.SeekbarStyle
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
@@ -435,13 +436,13 @@ fun SettingsScreen(
     var showHiResStartDialog by remember { mutableStateOf(false) }
     var showEqSheet by remember { mutableStateOf(false) }
     var showAutoEq by remember { mutableStateOf(false) }
+    var showSeekbarStyleDialog by remember { mutableStateOf(false) }
     var showLyricsProviderDialog by remember { mutableStateOf(false) }
     var showLyricsOffsetDialog by remember { mutableStateOf(false) }
     var showLyricsSizeDialog by remember { mutableStateOf(false) }
     var showLyricsAutoHideDialog by remember { mutableStateOf(false) }
     var showTranslationLanguageDialog by remember { mutableStateOf(false) }
     var showLoudnessDialog by remember { mutableStateOf(false) }
-    var showClarityPresetDialog by remember { mutableStateOf(false) }
     var showSyncPlaylistsSheet by remember { mutableStateOf(false) }
     var showYtLibraryVisibilitySheet by remember { mutableStateOf(false) }
     var showYtChannelSheet by remember { mutableStateOf(false) }
@@ -1077,13 +1078,12 @@ fun SettingsScreen(
                         item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel("Output & Loudness")
-                    val clarityPreset = remember(misc.clarityPreset) { ClarityPresets.fromIndex(misc.clarityPreset) }
                     val loudnessSubtitle = when (loudness.mode) {
                         LoudnessMode.TRACK -> "Track \u2022 Match every track to -14 LUFS"
                         LoudnessMode.ALBUM -> "Album \u2022 Keep intentional album dynamics"
                         else -> "Off \u2022 Play tagged tracks at original level"
                     }
-                    SettingsGroup(rowCount = 11) { index, position ->
+                    SettingsGroup(rowCount = 9) { index, position ->
                         when (index) {
                             0 -> SettingsToggleCard(
                                 icon = Icons.Filled.Usb,
@@ -1201,35 +1201,6 @@ fun SettingsScreen(
                                 isHighlighted = (highlightedSettingId == "audio.studio_clarity"),
                             )
                             7 -> SettingsActionCard(
-                                icon = Icons.Filled.Tune,
-                                iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
-                                iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                title = stringResource(R.string.set_clarity_title),
-                                subtitle = stringResource(
-                                    R.string.set_clarity_row,
-                                    clarityPresetName(clarityPreset),
-                                    clarityPresetDescription(clarityPreset),
-                                ),
-                                onClick = { showClarityPresetDialog = true },
-                                position = position,
-                                isHighlighted = (highlightedSettingId == "audio.clarity_preset"),
-                            )
-                            8 -> SettingsToggleCard(
-                                icon = Icons.Filled.GraphicEq,
-                                iconContainer = MaterialTheme.colorScheme.secondaryContainer,
-                                iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                title = stringResource(R.string.set_clarity_bypass),
-                                subtitle = if (misc.clarityAtmosBypass) {
-                                    "Clarity bypasses on multichannel/spatial sources"
-                                } else {
-                                    "Off \u2022 Clarity processes every source"
-                                },
-                                checked = misc.clarityAtmosBypass,
-                                onCheckedChange = viewModel::setClarityAtmosBypass,
-                                position = position,
-                                isHighlighted = (highlightedSettingId == "audio.clarity_spatial_bypass"),
-                            )
-                            9 -> SettingsActionCard(
                                 icon = Icons.Filled.Headphones,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -1239,7 +1210,7 @@ fun SettingsScreen(
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "audio.autoeq"),
                             )
-                            10 -> SettingsToggleCard(
+                            8 -> SettingsToggleCard(
                                 icon = Icons.Filled.Tune,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -1260,7 +1231,7 @@ fun SettingsScreen(
                         item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel(stringResource(R.string.settings_section_appearance))
-                    SettingsGroup(rowCount = 12) { index, position ->
+                    SettingsGroup(rowCount = 13) { index, position ->
                         when (index) {
                             0 -> ThemeModeSelectorCard(
                                 currentThemeMode = theme?.themeMode ?: ThemeMode.SYSTEM,
@@ -1389,6 +1360,17 @@ fun SettingsScreen(
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "appearance.ui_haptics"),
                             )
+                            12 -> SettingsToggleCard(
+                                icon = Icons.Filled.Apps,
+                                iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                title = stringResource(R.string.settings_collapsing_nav_bar),
+                                subtitle = stringResource(R.string.settings_collapsing_nav_bar_sub),
+                                checked = misc.collapsingNavBar,
+                                onCheckedChange = viewModel::setCollapsingNavBar,
+                                position = position,
+                                isHighlighted = (highlightedSettingId == "appearance.collapsing_nav_bar"),
+                            )
                         }
                     }
                 }
@@ -1437,7 +1419,7 @@ fun SettingsScreen(
                         item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel(stringResource(R.string.settings_section_experimental))
-                    SettingsGroup(rowCount = 11) { index, position ->
+                    SettingsGroup(rowCount = 12) { index, position ->
                         when (index) {
                             0 -> SettingsToggleCard(
                                 icon = Icons.Filled.Lyrics,
@@ -1454,18 +1436,17 @@ fun SettingsScreen(
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "appearance.word_by_word_lyrics"),
                             )
-                            1 -> SettingsToggleCard(
+                            1 -> SettingsActionCard(
                                 icon = Icons.Filled.Waves,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                title = stringResource(R.string.settings_wavy_seekbar),
-                                subtitle = if (misc.wavySeekbarEnabled) {
-                                    stringResource(R.string.settings_wavy_seekbar_on)
-                                } else {
-                                    stringResource(R.string.settings_wavy_seekbar_off)
+                                title = stringResource(R.string.settings_seekbar_style),
+                                subtitle = when (misc.seekbarStyle) {
+                                    SeekbarStyle.DEFAULT -> stringResource(R.string.settings_seekbar_style_default)
+                                    SeekbarStyle.WAVY -> stringResource(R.string.settings_seekbar_style_wavy)
+                                    SeekbarStyle.WAVEFORM -> stringResource(R.string.settings_seekbar_style_waveform)
                                 },
-                                checked = misc.wavySeekbarEnabled,
-                                onCheckedChange = viewModel::setWavySeekbarEnabled,
+                                onClick = { showSeekbarStyleDialog = true },
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "appearance.wavy_seekbar"),
                             )
@@ -1499,7 +1480,22 @@ fun SettingsScreen(
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "appearance.lyrics_rotating_background"),
                             )
-                            4 -> SettingsActionCard(
+                            4 -> SettingsToggleCard(
+                                icon = Icons.Filled.Waves,
+                                iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                title = stringResource(R.string.settings_fluid_beat_sync),
+                                subtitle = if (misc.fluidBeatSyncEnabled) {
+                                    stringResource(R.string.settings_fluid_beat_sync_on)
+                                } else {
+                                    stringResource(R.string.settings_fluid_beat_sync_off)
+                                },
+                                checked = misc.fluidBeatSyncEnabled,
+                                onCheckedChange = viewModel::setFluidBeatSyncEnabled,
+                                position = position,
+                                isHighlighted = (highlightedSettingId == "appearance.fluid_beat_sync"),
+                            )
+                            5 -> SettingsActionCard(
                                 icon = Icons.Filled.Lyrics,
                                 iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
@@ -1509,7 +1505,7 @@ fun SettingsScreen(
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "appearance.lyrics_provider"),
                             )
-                            5 -> SettingsActionCard(
+                            6 -> SettingsActionCard(
                                 icon = Icons.Filled.Timer,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -1527,7 +1523,7 @@ fun SettingsScreen(
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "appearance.lyrics_offset"),
                             )
-                            6 -> SettingsActionCard(
+                            7 -> SettingsActionCard(
                                 icon = Icons.Filled.FormatSize,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -1546,7 +1542,7 @@ fun SettingsScreen(
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "appearance.lyrics_size"),
                             )
-                            7 -> SettingsActionCard(
+                            8 -> SettingsActionCard(
                                 icon = Icons.Filled.VisibilityOff,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -1563,7 +1559,7 @@ fun SettingsScreen(
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "appearance.lyrics_autohide"),
                             )
-                            8 -> SettingsActionCard(
+                            9 -> SettingsActionCard(
                                 icon = Icons.Filled.Translate,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -1577,7 +1573,7 @@ fun SettingsScreen(
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "appearance.translation_language"),
                             )
-                            9 -> SettingsToggleCard(
+                            10 -> SettingsToggleCard(
                                 icon = Icons.Filled.SmartDisplay,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -1592,7 +1588,7 @@ fun SettingsScreen(
                                 position = position,
                                 isHighlighted = (highlightedSettingId == "appearance.music_video"),
                             )
-                            10 -> SettingsToggleCard(
+                            11 -> SettingsToggleCard(
                                 icon = Icons.Filled.PlayCircle,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -2793,10 +2789,25 @@ fun SettingsScreen(
                 showEqSheet = false
                 showAutoEq = true
             },
+            onSavePreset = viewModel::saveEqPreset,
+            onRenamePreset = viewModel::renameEqPreset,
+            onDeletePreset = viewModel::deleteEqPreset,
         )
     }
 
 
+
+    // -- Seekbar visual style selector (Default, Wavy, Waveform) --
+    if (showSeekbarStyleDialog) {
+        SeekbarStyleDialog(
+            current = misc.seekbarStyle,
+            onSelect = {
+                viewModel.setSeekbarStyle(it)
+                showSeekbarStyleDialog = false
+            },
+            onDismiss = { showSeekbarStyleDialog = false },
+        )
+    }
 
     // -- Lyrics provider picker: preferred source first, automatic
     // fallback to the rest when it returns nothing --
@@ -2861,17 +2872,6 @@ fun SettingsScreen(
                 showLoudnessDialog = false
             },
             onDismiss = { showLoudnessDialog = false },
-        )
-    }
-
-    if (showClarityPresetDialog) {
-        ClarityPresetDialog(
-            currentIndex = misc.clarityPreset,
-            onSelect = {
-                viewModel.setClarityPreset(it)
-                showClarityPresetDialog = false
-            },
-            onDismiss = { showClarityPresetDialog = false },
         )
     }
 
