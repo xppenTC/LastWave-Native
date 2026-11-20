@@ -239,7 +239,11 @@ fun SignalPathDialog(
                     isLast = true,
                 ) {
                     Text(
-                        report.dacName ?: if (report.internalDirectActive) "Internal Hi-Res DAC" else "Android Default Output",
+                        report.dacName ?: when {
+                            report.internalSession?.route == InternalRoute.ANDROID_AUTO -> stringResource(R.string.route_android_auto)
+                            report.internalDirectActive -> "Internal Hi-Res DAC"
+                            else -> "Android Default Output"
+                        },
                         style = MaterialTheme.typography.bodyMedium.copy(
                             textDecoration = TextDecoration.Underline,
                         ),
@@ -356,7 +360,12 @@ fun SignalPathDialog(
                 // Exclusive usbdevfs never uses AudioTrack. Gold is a stricter
                 // verdict (clock + unity/FU + DSP off); do not call exclusive
                 // output "Shared AudioTrack" just because a metadata check failed.
-                val routeTrack = if (report.internalDirectActive) {
+                // Android Auto's track is a plain shared one; DIRECT_TRACK is an AudioTrack, not AAudio.
+                val routeTrack = if (report.internalSession?.route == InternalRoute.ANDROID_AUTO) {
+                    stringResource(R.string.signal_shared_track)
+                } else if (report.internalSession?.backend == com.lastwave.app.playback.InternalBackend.DIRECT_TRACK) {
+                    stringResource(R.string.signal_internal_backend_direct)
+                } else if (report.internalDirectActive) {
                     stringResource(R.string.signal_internal_track)
                 } else if (report.usbExclusiveActive || report.bitPerfect) {
                     stringResource(R.string.signal_direct_track)
@@ -422,6 +431,8 @@ fun SignalPathDialog(
                     HealthRow(
                         stringResource(R.string.signal_internal_status),
                         when {
+                            route == InternalRoute.ANDROID_AUTO && report.internalDirectActive ->
+                                stringResource(R.string.internal_reason_mixed)
                             report.internalDirectActive -> stringResource(R.string.internal_reason_active)
                             !internalEnabled -> stringResource(R.string.signal_internal_off)
                             internalAvailability != null -> stringResource(internalFailureDetail(internalAvailability.reason))
@@ -429,7 +440,8 @@ fun SignalPathDialog(
                         },
                     )
                     val probe = internalAvailability?.probe
-                    HealthRow(
+                    // Android Auto: a plain mixed track, no exclusive endpoint to show.
+                    if (route != InternalRoute.ANDROID_AUTO) HealthRow(
                         stringResource(R.string.signal_internal_endpoint),
                         when {
                             session != null -> stringResource(

@@ -168,8 +168,19 @@ class InternalDirectSignalPathTest {
         val report = evaluateSignalPath(input(aa))
         assertThat(report.directToHal).isFalse()
         assertThat(report.bitPerfect).isFalse()
-        assertThat(report.checks.first { it.labelRes == com.lastwave.app.R.string.signal_label_mixer }.passed)
-            .isFalse()
+        val mixer = report.checks.first { it.labelRes == com.lastwave.app.R.string.signal_label_mixer }
+        assertThat(mixer.passed).isFalse()
+        // A plain track Android Auto mixes: nothing may read as direct, AAudio or MMAP.
+        assertThat(mixer.detailRes).isEqualTo(com.lastwave.app.R.string.internal_reason_mixed)
+        assertThat(report.outputEngineName).isEqualTo("Android AudioTrack")
+        assertThat(report.outputFlags).doesNotContain("DIRECT_HAL")
+        assertThat(report.fidelityScore).isEqualTo(65)
+    }
+
+    @Test
+    fun directTrackIsNotCalledAAudio() {
+        val report = evaluateSignalPath(input(trackSession(InternalRoute.WIRED, verified = true)))
+        assertThat(report.outputEngineName).isEqualTo("Direct HAL (AudioTrack DIRECT)")
     }
 
     @Test

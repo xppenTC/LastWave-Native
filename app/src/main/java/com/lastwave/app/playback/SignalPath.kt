@@ -360,6 +360,12 @@ fun evaluateSignalPath(i: SignalPathInput): SignalPathReport {
     val internal = i.internalDirect
     if (internal != null) {
         checks += when {
+            // A plain track that Android Auto mixes with every app (openProjectionTrackLocked).
+            internal.route == InternalRoute.ANDROID_AUTO -> PathCheck(
+                R.string.signal_label_mixer,
+                R.string.internal_reason_mixed,
+                passed = false,
+            )
             internal.backend == InternalBackend.DIRECT_TRACK && internal.directVerified -> PathCheck(
                 R.string.signal_label_mixer,
                 R.string.signal_detail_internal_mixer_direct_track,
@@ -551,6 +557,8 @@ private fun finishReport(
     dac: UsbDacInfo?,
 ): SignalPathReport {
     val internal = i.internalDirect
+    // Android Auto gets a plain AudioTrack, mixed with every app: nothing direct to report.
+    val projected = internal?.route == InternalRoute.ANDROID_AUTO
     val isBp = internal == null &&
         i.usbExclusiveActive &&
         !i.clockFallbackResampled &&
@@ -559,6 +567,8 @@ private fun finishReport(
 
     val engine = when {
         i.usbExclusiveActive -> "USB Exclusive Output"
+        projected -> "Android AudioTrack"
+        internal?.backend == InternalBackend.DIRECT_TRACK -> "Direct HAL (AudioTrack DIRECT)"
         internal != null -> "Direct HAL (AAudio MMAP)"
         i.platformBitPerfectConfigured -> "Android Bit-Perfect Output"
         else -> "Android AudioTrack"
@@ -584,7 +594,7 @@ private fun finishReport(
     flags += "PIPELINE64"
     if (isBp) flags += "PERFECTBITPERFECT"
     if (i.usbExclusiveActive) flags += "EXCLUSIVE"
-    if (internal != null) flags += "DIRECT_HAL"
+    if (internal != null && !projected) flags += "DIRECT_HAL"
     if (i.isLossless) flags += "LOSSLESS"
 
     val volMode = when {
@@ -612,7 +622,7 @@ private fun finishReport(
     val fidelity = when {
         isBp -> 100
         i.usbExclusiveActive -> 85
-        internal != null -> 80
+        internal != null && !projected -> 80
         else -> 65
     }
 
