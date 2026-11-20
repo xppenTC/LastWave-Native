@@ -68,6 +68,21 @@ class YtLikedSongsSyncTest {
     }
 
     @Test
+    fun syncOffNeitherImportsNorSendsLikes() = runTest {
+        val store = Store(listOf(song), account("A"))
+        store.syncEnabled.value = false
+        store.remote = listOf(other)
+        val sync = store.sync(backgroundScope)
+        sync.syncNow()
+        assertThat(store.writes).isEmpty()
+        assertThat(store.saved.tracks).containsExactly(song)
+        store.syncEnabled.value = true
+        sync.syncNow()
+        assertThat(store.writes).containsExactly("abcdefghijk" to true)
+        assertThat(store.saved.tracks.map { it.youtubeVideoIdOrNull() }).containsExactly("abcdefghijk", "lmnopqrstuv")
+    }
+
+    @Test
     fun unlikeWhileGuestCannotBeResurrectedAtLogin() = runTest {
         val store = Store(listOf(song), YtConnection.DISCONNECTED)
         val sync = store.sync(backgroundScope)
@@ -276,7 +291,9 @@ class YtLikedSongsSyncTest {
 
         fun manager(scope: CoroutineScope, sync: YtLikedSongsSync) =
             LikedSongsManager(mockk<Context>(), repository, scope, mockk<SettingsPreferences>(), sync)
-        fun sync(scope: CoroutineScope) = YtLikedSongsSync(dataStore, repository, api, auth, scope)
+        val syncEnabled = MutableStateFlow(true)
+        private val preferences = mockk<YtMusicPreferences>().also { every { it.syncEnabled } returns syncEnabled }
+        fun sync(scope: CoroutineScope) = YtLikedSongsSync(dataStore, repository, api, auth, scope, preferences)
         fun journal(): LikeSyncJournal = dataStore.data.value[stringPreferencesKey("yt_liked_songs_journal_v1")]
             ?.let { Json.decodeFromString<LikeSyncJournal>(it) } ?: LikeSyncJournal()
     }

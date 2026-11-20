@@ -120,6 +120,7 @@ class YtLikedSongsSync @Inject constructor(
     private val innerTube: InnerTubeMusicApi,
     private val auth: YtMusicAuthManager,
     private val applicationScope: CoroutineScope,
+    private val preferences: YtMusicPreferences,
 ) {
     internal val mutationMutex = Mutex()
     private val syncMutex = Mutex()
@@ -147,6 +148,7 @@ class YtLikedSongsSync @Inject constructor(
             auth.connection.map { it.likeAccountKey() }.distinctUntilChanged().collect { requestSync() }
         }
         applicationScope.launch { playlists.changes.collect { requestSync() } }
+        applicationScope.launch { preferences.syncEnabled.distinctUntilChanged().collect { requestSync() } }
         applicationScope.launch {
             while (true) {
                 delay(60_000)
@@ -228,6 +230,10 @@ class YtLikedSongsSync @Inject constructor(
                 readJournal().adoptGuest(account).also { writeJournal(it) }
             }
             if (account == null) return@sync
+            // Liked Songs mirrors the account's likes only with "Sync with YouTube" on:
+            // connecting alone imported every YouTube like and liked every local song.
+            // Hearts tapped meanwhile stay in the journal and go once it is turned on.
+            if (!preferences.syncEnabled.first()) return@sync
             val submitted = mutableSetOf<Long>()
             for (change in initial.pending.filter { it.account == account }) {
                 if (auth.connection.value != connection) return@sync
